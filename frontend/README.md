@@ -1,4 +1,4 @@
-# Vettor
+# Jobrizza
 
 A modern recruitment platform that leverages AI to streamline the hiring process for both companies and candidates.
 
@@ -78,7 +78,7 @@ frontend/
 
 Place the following images in the `public/images` directory:
 
-1. `logo.png` - Main logo for Vettor (used in header and footer)
+1. `logo.png` - Main logo for Jobrizza (used in header and footer)
 2. `hero-image.png` - Main hero section image (recommended size: 2432x1442px)
 3. `hr-lead.jpg` - HR Lead testimonial profile picture
 4. `areeba.jpg` - Areeba testimonial profile picture

@@ -3,15 +3,15 @@ import { useState } from 'react'
 
 const faqs = [
   {
-    question: "How does Vettor use AI for recruitment?",
-    answer: "Vettor uses advanced AI algorithms to screen, rank, and match candidates to job requirements, saving time and improving hiring quality."
+    question: "How does Jobrizza use AI for recruitment?",
+    answer: "Jobrizza uses advanced AI algorithms to screen, rank, and match candidates to job requirements, saving time and improving hiring quality."
   },
   {
     question: "Can candidates create a CV on the platform?",
     answer: "Yes! Candidates can generate an AI-optimized CV and receive personalized job recommendations and career roadmaps."
   },
   {
-    question: "Is my data secure on Vettor?",
+    question: "Is my data secure on Jobrizza?",
     answer: "Absolutely. We use industry-standard security practices to keep your data safe and private."
   },
   {
@@ -19,7 +19,7 @@ const faqs = [
     answer: "You can book a demo or join the early access list directly from our landing page or via the respective pages in the navigation."
   },
   {
-    question: "What regions does Vettor support?",
+    question: "What regions does Jobrizza support?",
     answer: "We are starting in Pakistan, India, the Middle East, and African markets, with plans to expand globally."
   },
 ]

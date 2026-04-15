@@ -25,7 +25,7 @@ export function Navbar() {
                                         <div className="relative h-12 w-12 sm:h-14 sm:w-14 flex items-center justify-center overflow-hidden rounded-xl bg-white p-2 shadow-md ring-1 ring-gray-200/50 transition-all duration-300 group-hover:scale-105 group-hover:shadow-lg">
                                             <Image 
                                                 src="/images/logo.png" 
-                                                alt="Vettor logo" 
+                                                alt="Jobrizza logo" 
                                                 width={56} 
                                                 height={56} 
                                                 className="h-full w-full object-contain object-center" 
@@ -33,7 +33,7 @@ export function Navbar() {
                                             />
                                         </div>
                                         <span className="text-xl sm:text-2xl font-bold text-blue-600 hidden sm:block">
-                                            Vettor
+                                            Jobrizza
                                         </span>
                                     </Link>
                                 </div>

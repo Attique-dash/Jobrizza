@@ -321,7 +321,7 @@ export default function LandingPage() {
           <Link href="/" className="flex items-center">
             <Image
               src="/images/logo.png"
-              alt="Vettor logo"
+              alt="Jobrizza logo"
               width={160}
               height={160}
               className="h-14 w-auto sm:h-16 md:h-20 object-contain"
@@ -689,13 +689,13 @@ export default function LandingPage() {
             <div className="relative h-10 w-10 flex items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-white to-slate-50 p-1 shadow-md ring-1 ring-slate-200/50">
               <Image 
                 src="/images/logo.png" 
-                alt="Vettor logo" 
+                alt="Jobrizza logo" 
                 width={32} 
                 height={32} 
                 className="h-full w-full object-contain object-center" 
               />
             </div>
-            <span className="font-medium text-slate-600">Vettor <span className="text-slate-300">•</span> AI co-pilot for recruiters</span>
+            <span className="font-medium text-slate-600">Jobrizza <span className="text-slate-300">•</span> AI co-pilot for recruiters</span>
           </div>
           <div className="flex flex-col items-center gap-2 text-center sm:items-end sm:text-right">
             <p className="text-sm text-slate-700 font-semibold">
@@ -708,7 +708,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-6">
             <Link href="#" className="font-medium transition-colors duration-200 hover:text-slate-700 hover:underline">Privacy</Link>
             <Link href="#" className="font-medium transition-colors duration-200 hover:text-slate-700 hover:underline">Terms</Link>
-            <Link href="mailto:contact@vettor.com" className="font-medium transition-colors duration-200 hover:text-sky-600 hover:underline">contact@vettor.com</Link>
+            <Link href="mailto:contact@Jobrizza.com" className="font-medium transition-colors duration-200 hover:text-sky-600 hover:underline">contact@Jobrizza.com</Link>
           </div>
         </div>
       </footer>
