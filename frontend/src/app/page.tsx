@@ -3,7 +3,9 @@
 import { motion, useReducedMotion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
-import { FormEvent, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { useDropzone } from 'react-dropzone'
 
 const painPoints = [
   {
@@ -82,6 +84,17 @@ const founderBenefits = [
     description: 'Just your email to join the waitlist.'
   }
 ]
+
+interface CVData {
+  filename: string
+  name: string | null
+  email: string | null
+  phone: string | null
+  skills: string[]
+  education: string[]
+  experience: string[]
+  raw_text: string
+}
 
 type WaitlistFormProps = {
   submitted: boolean
@@ -193,8 +206,11 @@ function WaitlistForm({
 }
 
 export default function LandingPage() {
+  const router = useRouter()
   const [mounted, setMounted] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const prefersReducedMotion = useReducedMotion()
 
   useEffect(() => {
@@ -241,6 +257,62 @@ export default function LandingPage() {
       throw new Error(message)
     }
   }
+
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return
+
+    const file = acceptedFiles[0]
+    setIsUploading(true)
+    setUploadError(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000)
+
+    try {
+      const response = await fetch('http://localhost:5000/api/upload-cv', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Upload failed' }))
+        throw new Error(errorData.error || `Upload failed: ${response.status}`)
+      }
+
+      const result = await response.json()
+      if (result.success) {
+        sessionStorage.setItem('cvData', JSON.stringify(result.data))
+        router.push('/cv-result')
+      } else {
+        throw new Error(result.error || 'Processing failed')
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        setUploadError('Upload timed out. Please check that the backend server is running on port 5000.')
+      } else {
+        setUploadError(err instanceof Error ? err.message : 'Failed to upload CV. Please try again.')
+      }
+    } finally {
+      setIsUploading(false)
+      clearTimeout(timeoutId)
+    }
+  }, [router])
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'application/pdf': ['.pdf'],
+      'application/msword': ['.doc'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+    },
+    maxFiles: 1,
+  })
 
   return (
     <div className="bg-white text-slate-900">
@@ -338,26 +410,45 @@ export default function LandingPage() {
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Preview</span>
               </div>
 
-              {/* Upload area with animation */}
-              <motion.div
-                whileHover={{ scale: 1.02 }}
-                className="relative rounded-2xl border-2 border-dashed border-sky-300/50 bg-gradient-to-br from-sky-50/50 to-blue-50/50 px-8 py-16 text-center backdrop-blur-sm transition-all duration-300 hover:border-sky-400 hover:bg-gradient-to-br hover:from-sky-50 hover:to-blue-50"
+              {/* Upload area with dropzone */}
+              <div
+                {...getRootProps()}
+                className={`relative rounded-2xl border-2 border-dashed px-8 py-12 text-center backdrop-blur-sm transition-all duration-300 cursor-pointer hover:scale-[1.02] ${
+                  isDragActive
+                    ? 'border-sky-500 bg-gradient-to-br from-sky-100 to-blue-100'
+                    : 'border-sky-300/50 bg-gradient-to-br from-sky-50/50 to-blue-50/50 hover:border-sky-400 hover:bg-gradient-to-br hover:from-sky-50 hover:to-blue-50'
+                }`}
               >
-                <motion.div
-                  animate={{ y: [0, -8, 0] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                  className="mb-4 text-5xl"
-                >
-                  📄
-                </motion.div>
-                <p className="text-base font-semibold text-slate-700 mb-2">CV Upload Area</p>
-                <p className="text-sm text-slate-500">Drag & drop or click to upload</p>
-                <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">
-                  <span>PDF, DOC, DOCX</span>
-                  <span>•</span>
-                  <span>Up to 200 files</span>
-                </div>
-              </motion.div>
+                <input {...getInputProps()} />
+                {isUploading ? (
+                  <div className="flex flex-col items-center">
+                    <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-sky-500 border-t-transparent mb-3"></div>
+                    <p className="text-base font-semibold text-slate-700">Processing...</p>
+                  </div>
+                ) : (
+                  <>
+                    <motion.div
+                      animate={{ y: [0, -8, 0] }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                      className="mb-4 text-5xl"
+                    >
+                      📄
+                    </motion.div>
+                    <p className="text-base font-semibold text-slate-700 mb-2">
+                      {isDragActive ? 'Drop CV here...' : 'CV Upload Area'}
+                    </p>
+                    <p className="text-sm text-slate-500">Drag & drop or click to upload</p>
+                    <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">
+                      <span>PDF, DOC, DOCX</span>
+                      <span>•</span>
+                      <span>Up to 200 files</span>
+                    </div>
+                  </>
+                )}
+                {uploadError && (
+                  <p className="mt-3 text-sm text-red-600">{uploadError}</p>
+                )}
+              </div>
 
               {/* Filter settings */}
               <div className="mt-6 rounded-2xl border border-slate-200/50 bg-gradient-to-br from-white to-slate-50/50 px-6 py-5 backdrop-blur-sm">
