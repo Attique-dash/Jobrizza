@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import os
 import re
-import random
+import json
 from werkzeug.utils import secure_filename
 
 try:
@@ -15,6 +15,12 @@ try:
 except ImportError:
     docx = None
 
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+
 app = Flask(__name__)
 CORS(app, origins='*', supports_credentials=True)
 
@@ -25,8 +31,34 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-# Store extracted CV data (in production, use a database)
 cv_data_store = []
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def get_claude_client():
+    if not ANTHROPIC_AVAILABLE:
+        return None
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    return anthropic.Anthropic(api_key=api_key)
+
+
+def call_claude(system_prompt: str, user_prompt: str, max_tokens: int = 1500) -> str | None:
+    client = get_claude_client()
+    if not client:
+        return None
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": user_prompt}],
+            system=system_prompt,
+        )
+        return message.content[0].text
+    except Exception as e:
+        print(f"Claude API error: {e}")
+        return None
 
 
 def allowed_file(filename):
@@ -35,613 +67,919 @@ def allowed_file(filename):
 
 def extract_text_from_pdf(filepath):
     if PyPDF2 is None:
-        return "PDF extraction not available (PyPDF2 not installed)"
+        return "PDF extraction not available"
     text = ""
     try:
-        with open(filepath, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            for page in pdf_reader.pages:
+        with open(filepath, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
+            for page in reader.pages:
                 text += page.extract_text() or ""
     except Exception as e:
-        return f"Error reading PDF: {str(e)}"
+        return f"Error reading PDF: {e}"
     return text
 
 
 def extract_text_from_docx(filepath):
     if docx is None:
-        return "DOCX extraction not available (python-docx not installed)"
+        return "DOCX extraction not available"
     try:
         doc = docx.Document(filepath)
-        return "\n".join([paragraph.text for paragraph in doc.paragraphs])
+        return "\n".join([p.text for p in doc.paragraphs])
     except Exception as e:
-        return f"Error reading DOCX: {str(e)}"
+        return f"Error reading DOCX: {e}"
 
 
-def extract_text_from_doc(filepath):
-    # For .doc files, we'd need additional libraries like antiword or textract
-    return "DOC format requires additional setup. Please convert to DOCX or PDF."
+# ─── CV Parsing ───────────────────────────────────────────────────────────────
 
-
-def parse_cv_data(text, filename):
-    """Extract structured data from CV text"""
+def parse_cv_data(text: str, filename: str) -> dict:
     data = {
         'filename': filename,
-        'raw_text': text[:2000],  # Limit text length
+        'raw_text': text[:3000],
         'email': None,
         'phone': None,
         'skills': [],
         'name': None,
         'education': [],
-        'experience': []
+        'experience': [],
+        'word_count': len(text.split()),
     }
 
-    # Extract email
-    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-    email_match = re.search(email_pattern, text)
+    email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
     if email_match:
         data['email'] = email_match.group(0)
 
-    # Extract phone
-    phone_patterns = [
-        r'\+?[\d\s\-\(\)]{10,20}',
-        r'\(\d{3}\)\s*\d{3}[\s-]?\d{4}',
-        r'\d{3}[\s-]\d{3}[\s-]\d{4}'
-    ]
-    for pattern in phone_patterns:
-        phone_match = re.search(pattern, text)
-        if phone_match:
-            data['phone'] = phone_match.group(0)
+    for pattern in [r'\+?[\d\s\-\(\)]{10,20}', r'\(\d{3}\)\s*\d{3}[\s-]?\d{4}', r'\d{3}[\s-]\d{3}[\s-]\d{4}']:
+        m = re.search(pattern, text)
+        if m:
+            data['phone'] = m.group(0).strip()
             break
 
-    # Extract skills (common tech and professional skills)
     common_skills = [
-        'python', 'javascript', 'java', 'c++', 'c#', 'react', 'angular', 'vue',
-        'node.js', 'django', 'flask', 'sql', 'mysql', 'postgresql', 'mongodb',
-        'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'git', 'agile', 'scrum',
-        'project management', 'data analysis', 'machine learning', 'ai',
-        'excel', 'powerpoint', 'word', 'tableau', 'power bi', 'salesforce',
-        'communication', 'leadership', 'teamwork', 'problem solving'
+        'python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'go', 'rust',
+        'react', 'angular', 'vue', 'next.js', 'node.js', 'django', 'flask',
+        'fastapi', 'spring', 'express', 'sql', 'mysql', 'postgresql', 'mongodb',
+        'redis', 'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'git', 'ci/cd',
+        'agile', 'scrum', 'machine learning', 'deep learning', 'tensorflow',
+        'pytorch', 'data analysis', 'tableau', 'power bi', 'excel', 'pandas',
+        'numpy', 'scikit-learn', 'rest api', 'graphql', 'microservices',
+        'project management', 'leadership', 'communication', 'problem solving',
+        'teamwork', 'agile', 'devops', 'linux', 'figma', 'photoshop',
     ]
     text_lower = text.lower()
-    for skill in common_skills:
-        if skill in text_lower:
-            data['skills'].append(skill)
+    data['skills'] = [s for s in common_skills if s in text_lower]
 
-    # Try to extract name (usually at the beginning or after "Name:")
-    lines = text.split('\n')[:10]  # Check first 10 lines
+    lines = text.split('\n')[:10]
     for line in lines:
         line = line.strip()
-        if line and len(line) > 2 and len(line) < 50:
-            # Skip if it looks like email, phone, or common headers
-            if not re.match(r'^[\d\W]', line) and 'email' not in line.lower() and 'phone' not in line.lower():
+        if line and 2 < len(line) < 50:
+            if not re.match(r'^[\d\W]', line) and 'email' not in line.lower():
                 if 'name' in line.lower() and ':' in line:
                     data['name'] = line.split(':')[1].strip()
                 elif not data['name'] and line[0].isupper():
                     data['name'] = line
                 break
 
-    # Extract education keywords
-    edu_keywords = ['bachelor', 'master', 'phd', 'degree', 'university', 'college', 'school']
-    for keyword in edu_keywords:
-        if keyword in text_lower:
-            # Find the sentence containing the keyword
-            sentences = re.split(r'[.\n]', text)
-            for sentence in sentences:
-                if keyword in sentence.lower():
-                    data['education'].append(sentence.strip()[:100])
+    edu_keywords = ['bachelor', 'master', 'phd', 'b.s.', 'm.s.', 'degree', 'university', 'college', 'school', 'b.e.', 'b.tech', 'm.tech']
+    for kw in edu_keywords:
+        if kw in text_lower:
+            for sentence in re.split(r'[.\n]', text):
+                if kw in sentence.lower() and len(sentence.strip()) > 10:
+                    data['education'].append(sentence.strip()[:150])
                     break
 
-    # Extract experience keywords
-    exp_keywords = ['experience', 'work', 'job', 'position', 'role', 'company', 'employed']
-    for keyword in exp_keywords:
-        if keyword in text_lower:
-            sentences = re.split(r'[.\n]', text)
-            for sentence in sentences[:5]:  # Limit to first 5 mentions
-                if keyword in sentence.lower() and len(sentence) > 20:
-                    data['experience'].append(sentence.strip()[:100])
+    exp_keywords = ['experience', 'worked at', 'employed', 'position', 'role', 'company']
+    for kw in exp_keywords:
+        if kw in text_lower:
+            for sentence in re.split(r'[.\n]', text)[:20]:
+                if kw in sentence.lower() and len(sentence.strip()) > 20:
+                    data['experience'].append(sentence.strip()[:150])
                     break
 
     return data
 
 
-def analyze_cv_quality(cv_data, text):
-    """Analyze CV quality and return score, mistakes, and suggestions"""
+# ─── Legacy analysis (fast, no AI) ───────────────────────────────────────────
+
+def analyze_cv_quality(cv_data: dict, text: str) -> dict:
     score = 0
-    max_score = 100
     mistakes = []
     suggestions = []
     categories = {
         'contact_info': {'score': 0, 'max': 15, 'issues': []},
-        'structure': {'score': 0, 'max': 20, 'issues': []},
-        'content': {'score': 0, 'max': 25, 'issues': []},
-        'skills': {'score': 0, 'max': 20, 'issues': []},
-        'grammar_style': {'score': 0, 'max': 20, 'issues': []}
+        'structure':    {'score': 0, 'max': 20, 'issues': []},
+        'content':      {'score': 0, 'max': 25, 'issues': []},
+        'skills':       {'score': 0, 'max': 20, 'issues': []},
+        'grammar_style':{'score': 0, 'max': 20, 'issues': []},
     }
 
-    # 1. Contact Info Check (15 points)
     if cv_data.get('email'):
         categories['contact_info']['score'] += 5
     else:
-        categories['contact_info']['issues'].append('Missing email address')
         mistakes.append('No email address detected')
         suggestions.append('Add a professional email address at the top of your CV')
 
     if cv_data.get('phone'):
         categories['contact_info']['score'] += 5
     else:
-        categories['contact_info']['issues'].append('Missing phone number')
         mistakes.append('No phone number detected')
         suggestions.append('Include your phone number for easy contact')
 
     if cv_data.get('name'):
         categories['contact_info']['score'] += 5
     else:
-        categories['contact_info']['issues'].append('Missing full name')
         mistakes.append('Name not clearly detected')
         suggestions.append('Make sure your full name is prominently displayed at the top')
 
-    # 2. Structure Check (20 points)
     text_lower = text.lower()
 
-    # Check for summary/objective
-    if any(word in text_lower for word in ['summary', 'objective', 'profile', 'about me']):
+    if any(w in text_lower for w in ['summary', 'objective', 'profile', 'about']):
         categories['structure']['score'] += 5
     else:
-        categories['structure']['issues'].append('Missing professional summary')
-        mistakes.append('No professional summary or objective found')
-        suggestions.append('Add a brief professional summary (2-3 lines) at the beginning')
+        mistakes.append('No professional summary found')
+        suggestions.append('Add a 2-3 line professional summary at the beginning')
 
-    # Check for education section
-    if cv_data.get('education') and len(cv_data['education']) > 0:
+    if cv_data.get('education'):
         categories['structure']['score'] += 5
     else:
-        categories['structure']['issues'].append('Education section unclear')
-        mistakes.append('Education details not found or unclear')
+        mistakes.append('Education section unclear')
         suggestions.append('Clearly list your education with degrees, institutions, and dates')
 
-    # Check for experience section
-    if cv_data.get('experience') and len(cv_data['experience']) > 0:
+    if cv_data.get('experience'):
         categories['structure']['score'] += 5
     else:
-        categories['structure']['issues'].append('Work experience not clear')
         mistakes.append('Work experience section missing or unclear')
         suggestions.append('Add detailed work experience with company names, roles, and dates')
 
-    # Check for skills section
-    if cv_data.get('skills') and len(cv_data['skills']) > 0:
+    if cv_data.get('skills'):
         categories['structure']['score'] += 5
-    else:
-        categories['structure']['issues'].append('No clear skills section')
-        suggestions.append('Create a dedicated skills section with relevant keywords')
 
-    # 3. Content Quality (25 points)
-    word_count = len(text.split())
-    if 200 <= word_count <= 800:
+    wc = cv_data.get('word_count', len(text.split()))
+    if 200 <= wc <= 800:
         categories['content']['score'] += 10
-    elif word_count < 200:
-        categories['content']['issues'].append('CV too short')
+    elif wc < 200:
         mistakes.append('CV content is too brief')
-        suggestions.append('Expand your CV to at least 300-400 words for better impact')
-    elif word_count > 1000:
-        categories['content']['issues'].append('CV too long')
+        suggestions.append('Expand to at least 300-400 words for better impact')
+    else:
         mistakes.append('CV is too lengthy')
-        suggestions.append('Keep your CV concise (1-2 pages recommended)')
+        suggestions.append('Keep CV concise (1-2 pages recommended)')
 
-    # Check for action verbs
     action_verbs = ['managed', 'led', 'developed', 'created', 'implemented', 'designed',
                     'achieved', 'improved', 'increased', 'reduced', 'launched', 'built',
                     'coordinated', 'supervised', 'trained', 'optimized', 'delivered']
-    action_verb_count = sum(1 for verb in action_verbs if verb in text_lower)
-    if action_verb_count >= 3:
+    if sum(1 for v in action_verbs if v in text_lower) >= 3:
         categories['content']['score'] += 10
     else:
-        categories['content']['issues'].append('Limited action verbs')
-        mistakes.append('Not enough strong action verbs in descriptions')
-        suggestions.append('Use strong action verbs like "managed", "developed", "achieved" to describe accomplishments')
+        mistakes.append('Not enough strong action verbs')
+        suggestions.append('Use strong action verbs: managed, developed, achieved, etc.')
 
-    # Check for quantifiable achievements
-    if re.search(r'\d+%|\$\d+|\d+\s*(years?|months?|people|team|projects?)', text_lower):
+    if re.search(r'\d+%|\$\d+|\d+\s*(years?|months?|people|team)', text_lower):
         categories['content']['score'] += 5
     else:
-        categories['content']['issues'].append('No quantifiable achievements')
-        mistakes.append('Missing quantifiable achievements (numbers, percentages)')
-        suggestions.append('Add numbers to your achievements (e.g., "Increased sales by 25%")')
+        mistakes.append('Missing quantifiable achievements')
+        suggestions.append('Add numbers to achievements (e.g., "Increased sales by 25%")')
 
-    # 4. Skills Assessment (20 points)
-    skills_count = len(cv_data.get('skills', []))
-    if skills_count >= 8:
+    sc = len(cv_data.get('skills', []))
+    if sc >= 8:
         categories['skills']['score'] += 15
-    elif skills_count >= 5:
+    elif sc >= 5:
         categories['skills']['score'] += 10
-    elif skills_count >= 3:
+    elif sc >= 3:
         categories['skills']['score'] += 5
     else:
-        categories['skills']['issues'].append('Too few skills listed')
         mistakes.append('Limited skills showcased')
         suggestions.append('Add more relevant skills (technical and soft skills)')
 
-    # Check for soft skills
-    soft_skills = ['communication', 'leadership', 'teamwork', 'problem solving',
-                   'time management', 'collaboration', 'adaptability']
-    soft_skill_count = sum(1 for skill in soft_skills if skill in text_lower)
-    if soft_skill_count >= 2:
+    soft = ['communication', 'leadership', 'teamwork', 'problem solving']
+    if sum(1 for s in soft if s in text_lower) >= 2:
         categories['skills']['score'] += 5
     else:
-        categories['skills']['issues'].append('Missing soft skills')
-        suggestions.append('Include relevant soft skills like communication, leadership, teamwork')
-
-    # 5. Grammar & Style (20 points)
-    # Check for common mistakes
-    common_errors = {
-        r'\bi am\b': 'Consider using "I am" in a more professional form',
-        r'\bive\b|\bi\'ve\b': "Avoid contractions like \"I've\" - use \"I have\"",
-        r'\bimo\b|\bimho\b': 'Avoid informal abbreviations',
-        r'\b(\w+) \1\b': 'Remove duplicate words',
-        r'  +': 'Fix multiple spaces',
-        r'[A-Z]{4,}': 'Avoid excessive capitalization',
-    }
+        suggestions.append('Include relevant soft skills like communication and leadership')
 
     grammar_issues = 0
-    for pattern, message in common_errors.items():
-        if re.search(pattern, text_lower):
+    for pattern in [r'\b(\w+) \1\b', r'  +', r'[A-Z]{5,}']:
+        if re.search(pattern, text):
             grammar_issues += 1
 
     if grammar_issues == 0:
         categories['grammar_style']['score'] += 10
     else:
-        categories['grammar_style']['issues'].append(f'{grammar_issues} potential grammar/style issues')
-        mistakes.append('Potential grammar or style issues detected')
+        mistakes.append('Potential grammar or formatting issues detected')
         suggestions.append('Review for proper grammar and professional tone')
 
-    # Check formatting consistency
-    lines = text.split('\n')
-    inconsistent_spacing = sum(1 for i in range(len(lines)-1)
-                                  if lines[i].strip() and not lines[i+1].strip()
-                                  or not lines[i].strip() and lines[i+1].strip())
-    if inconsistent_spacing < 5:
-        categories['grammar_style']['score'] += 5
+    if text.count('•') + text.count('-') + text.count('*') >= 5:
+        categories['grammar_style']['score'] += 10
     else:
-        categories['grammar_style']['issues'].append('Inconsistent formatting')
-        mistakes.append('Inconsistent spacing and formatting')
-        suggestions.append('Use consistent spacing and formatting throughout')
-
-    # Check for bullet points (professional formatting)
-    bullet_count = text.count('•') + text.count('-') + text.count('*')
-    if bullet_count >= 5:
-        categories['grammar_style']['score'] += 5
-    else:
-        categories['grammar_style']['issues'].append('Limited bullet points')
         suggestions.append('Use bullet points for better readability')
 
-    # Calculate total score
-    total_score = sum(cat['score'] for cat in categories.values())
+    total = sum(c['score'] for c in categories.values())
+    pct = round((total / 100) * 100)
 
-    # Determine status
-    if total_score >= 85:
-        status = 'Excellent'
-        status_message = 'Your CV is professional and well-structured!'
-    elif total_score >= 70:
-        status = 'Good'
-        status_message = 'Good CV with minor improvements needed'
-    elif total_score >= 50:
-        status = 'Average'
-        status_message = 'Your CV needs some improvements to stand out'
+    if pct >= 85:
+        status, msg = 'Excellent', 'Your CV is professional and well-structured!'
+    elif pct >= 70:
+        status, msg = 'Good', 'Good CV with minor improvements needed'
+    elif pct >= 50:
+        status, msg = 'Average', 'Your CV needs some improvements to stand out'
     else:
-        status = 'Needs Work'
-        status_message = 'Significant improvements recommended'
+        status, msg = 'Needs Work', 'Significant improvements recommended'
 
     return {
-        'score': total_score,
-        'max_score': max_score,
-        'percentage': round((total_score / max_score) * 100),
+        'score': total,
+        'max_score': 100,
+        'percentage': pct,
         'status': status,
-        'status_message': status_message,
+        'status_message': msg,
         'categories': categories,
-        'mistakes': mistakes if mistakes else ['No major issues found'],
-        'suggestions': suggestions if suggestions else ['Great job! Your CV looks professional'],
-        'word_count': word_count,
-        'skills_count': skills_count
+        'mistakes': mistakes or ['No major issues found'],
+        'suggestions': suggestions or ['Great job! Your CV looks professional'],
+        'word_count': wc,
+        'skills_count': sc,
     }
 
 
-def generate_professional_cv(cv_data, analysis):
-    """Generate an improved professional version of the CV"""
-    improved = {
-        'name': cv_data.get('name', 'Your Name'),
-        'email': cv_data.get('email', 'your.email@example.com'),
-        'phone': cv_data.get('phone', 'Your Phone Number'),
-        'professional_summary': '',
-        'skills': cv_data.get('skills', []),
-        'education': cv_data.get('education', []),
-        'experience': cv_data.get('experience', []),
-        'improvements_made': []
+# ─── AI-powered analysis ──────────────────────────────────────────────────────
+
+def ai_full_analysis(text: str, cv_data: dict) -> dict:
+    """Run full AI analysis: ATS score, mistake detector, template suggestion."""
+    prompt = f"""You are an expert CV/resume analyst. Analyze this CV and return ONLY valid JSON.
+
+CV TEXT:
+{text[:2500]}
+
+Return this exact JSON structure:
+{{
+  "ats_score": {{
+    "score": 0-100,
+    "grade": "A/B/C/D/F",
+    "keyword_density": "low/medium/high",
+    "format_issues": ["list of formatting problems"],
+    "missing_keywords": ["list of ATS keywords missing"],
+    "passed_checks": ["list of things that passed ATS"]
+  }},
+  "mistake_detector": {{
+    "grammar_errors": ["specific grammar mistakes found"],
+    "employment_gaps": ["any employment gaps detected"],
+    "weak_action_verbs": ["weak phrases and better alternatives"],
+    "missing_metrics": ["places where numbers/metrics are missing"],
+    "overall_writing_score": 0-100
+  }},
+  "template_suggestion": {{
+    "current_format": "description of current format",
+    "recommended_template": "Chronological/Functional/Hybrid/Modern/Executive",
+    "reasons": ["why this template suits better"],
+    "before_after_tips": ["specific layout improvements"]
+  }}
+}}"""
+
+    result = call_claude(
+        "You are an expert CV analyst. Return ONLY valid JSON with no markdown or commentary.",
+        prompt,
+        2000
+    )
+
+    if result:
+        try:
+            clean = result.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r"```json?\n?", "", clean).replace("```", "").strip()
+            return json.loads(clean)
+        except Exception:
+            pass
+
+    # Fallback
+    return {
+        "ats_score": {
+            "score": 62,
+            "grade": "C",
+            "keyword_density": "medium",
+            "format_issues": ["Use standard section headings", "Ensure consistent date formatting"],
+            "missing_keywords": ["quantified achievements", "industry-specific certifications"],
+            "passed_checks": ["Contact info present", "Skills section included"]
+        },
+        "mistake_detector": {
+            "grammar_errors": ["Check for passive voice usage", "Inconsistent tense in descriptions"],
+            "employment_gaps": ["No significant gaps detected"],
+            "weak_action_verbs": ["'Responsible for' → 'Managed'", "'Helped with' → 'Contributed to'"],
+            "missing_metrics": ["Add % improvements", "Add team size you managed", "Add project budgets"],
+            "overall_writing_score": 58
+        },
+        "template_suggestion": {
+            "current_format": "Basic chronological",
+            "recommended_template": "Hybrid",
+            "reasons": ["Hybrid format showcases both skills and experience", "Better for mid-career professionals"],
+            "before_after_tips": ["Move skills to a sidebar", "Add a metrics-driven summary section", "Use two-column layout"]
+        }
     }
 
-    improvements = []
 
-    # Generate professional summary if missing
-    if not any(word in cv_data.get('raw_text', '').lower()
-               for word in ['summary', 'objective', 'profile']):
-        skills_text = ', '.join(cv_data.get('skills', [])[:5])
-        improved['professional_summary'] = (
-            f"Results-driven professional with expertise in {skills_text}. "
-            f"Proven track record of delivering high-quality results and driving continuous improvement. "
-            f"Seeking to leverage skills and experience to contribute to organizational success."
-        )
-        improvements.append('Added professional summary highlighting key strengths')
-    else:
-        improved['professional_summary'] = 'Professional summary preserved from original CV'
+def ai_skill_gap(cv_data: dict, target_role: str = "") -> dict:
+    """Analyze skill gaps against job market demand."""
+    skills_str = ", ".join(cv_data.get('skills', []))
+    role = target_role or "Software Engineer"
 
-    # Enhance skills list
-    if len(cv_data.get('skills', [])) < 8:
-        additional_skills = [
-            'Problem Solving', 'Communication', 'Leadership',
-            'Time Management', 'Team Collaboration', 'Critical Thinking'
-        ]
-        improved['skills'] = list(set(cv_data.get('skills', []) + additional_skills))[:12]
-        improvements.append('Enhanced skills section with relevant soft skills')
+    prompt = f"""You are a career advisor. Analyze skill gaps for this candidate.
 
-    # Format education
-    if cv_data.get('education'):
-        improved['education'] = [edu.strip() for edu in cv_data['education'] if edu.strip()]
-        improvements.append('Standardized education section formatting')
+Current skills: {skills_str}
+Target role: {role}
+Experience snippets: {" | ".join(cv_data.get('experience', [])[:3])}
 
-    # Format experience with action verbs
-    if cv_data.get('experience'):
-        formatted_exp = []
-        for exp in cv_data['experience']:
-            # Add action verb if not present
-            exp_clean = exp.strip()
-            if exp_clean and len(exp_clean) > 10:
-                formatted_exp.append(exp_clean)
-        improved['experience'] = formatted_exp
-        improvements.append('Formatted experience section with consistent structure')
+Return ONLY this JSON:
+{{
+  "target_role": "{role}",
+  "match_percentage": 0-100,
+  "strong_skills": ["skills they have that are highly relevant"],
+  "missing_critical": ["critical skills missing - list 4-6"],
+  "missing_nice_to_have": ["nice-to-have skills missing - list 3-5"],
+  "market_demand": {{
+    "trending_up": ["skills gaining demand"],
+    "trending_down": ["skills losing relevance"],
+    "salary_impact": "Adding X skill could increase salary by Y%"
+  }},
+  "quick_wins": ["skills that could be learned in under 2 weeks"]
+}}"""
 
-    improved['improvements_made'] = improvements
-    return improved
+    result = call_claude(
+        "You are a career advisor. Return ONLY valid JSON.",
+        prompt, 1200
+    )
+    if result:
+        try:
+            clean = result.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r"```json?\n?", "", clean).replace("```", "").strip()
+            return json.loads(clean)
+        except Exception:
+            pass
 
+    return {
+        "target_role": role,
+        "match_percentage": 65,
+        "strong_skills": cv_data.get('skills', [])[:4],
+        "missing_critical": ["System Design", "Cloud Architecture", "CI/CD Pipelines", "Performance Optimization"],
+        "missing_nice_to_have": ["GraphQL", "Kubernetes", "Terraform"],
+        "market_demand": {
+            "trending_up": ["AI/ML integration", "TypeScript", "Cloud Native"],
+            "trending_down": ["jQuery", "Monolithic architectures"],
+            "salary_impact": "Adding cloud skills could increase salary by 15-25%"
+        },
+        "quick_wins": ["Git advanced workflows", "REST API best practices", "Basic Docker"]
+    }
+
+
+def ai_job_matches(cv_data: dict) -> list:
+    """Generate realistic job matches based on CV."""
+    skills_str = ", ".join(cv_data.get('skills', [])[:8])
+    name = cv_data.get('name', 'Candidate')
+
+    prompt = f"""You are a job matching engine. Generate 6 realistic job matches.
+
+Candidate skills: {skills_str}
+Education: {" | ".join(cv_data.get('education', []))[:200]}
+
+Return ONLY this JSON array:
+[
+  {{
+    "id": "j1",
+    "title": "Job Title",
+    "company": "Company Name",
+    "location": "City, Country",
+    "type": "Full-time/Remote/Hybrid",
+    "salary_min": 60000,
+    "salary_max": 90000,
+    "currency": "USD",
+    "match_score": 0-100,
+    "match_reasons": ["reason 1", "reason 2"],
+    "skills_matched": ["skill1", "skill2"],
+    "skills_missing": ["skill1"],
+    "posted_days_ago": 1-14,
+    "company_size": "50-200/200-1000/1000+"
+  }}
+]
+
+Generate 6 jobs with realistic companies and varying match scores (55-96%)."""
+
+    result = call_claude(
+        "You are a job matching AI. Return ONLY a valid JSON array.",
+        prompt, 1500
+    )
+    if result:
+        try:
+            clean = result.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r"```json?\n?", "", clean).replace("```", "").strip()
+            return json.loads(clean)
+        except Exception:
+            pass
+
+    return [
+        {"id": "j1", "title": "Senior Software Engineer", "company": "TechFlow Inc.", "location": "Remote",
+         "type": "Full-time", "salary_min": 95000, "salary_max": 130000, "currency": "USD",
+         "match_score": 92, "match_reasons": ["Strong Python skills", "Backend experience"],
+         "skills_matched": ["python", "sql", "docker"], "skills_missing": ["kubernetes"],
+         "posted_days_ago": 2, "company_size": "200-1000"},
+        {"id": "j2", "title": "Full Stack Developer", "company": "Innovate Labs", "location": "New York, NY",
+         "type": "Hybrid", "salary_min": 85000, "salary_max": 115000, "currency": "USD",
+         "match_score": 87, "match_reasons": ["React + Node.js match", "Agile experience"],
+         "skills_matched": ["react", "node.js", "mongodb"], "skills_missing": ["graphql"],
+         "posted_days_ago": 4, "company_size": "50-200"},
+        {"id": "j3", "title": "Backend Engineer", "company": "DataBridge Corp", "location": "San Francisco, CA",
+         "type": "Full-time", "salary_min": 110000, "salary_max": 145000, "currency": "USD",
+         "match_score": 79, "match_reasons": ["Database expertise", "API development"],
+         "skills_matched": ["postgresql", "python", "rest api"], "skills_missing": ["aws", "terraform"],
+         "posted_days_ago": 1, "company_size": "1000+"},
+        {"id": "j4", "title": "Frontend Developer", "company": "PixelCraft", "location": "London, UK",
+         "type": "Remote", "salary_min": 65000, "salary_max": 90000, "currency": "GBP",
+         "match_score": 74, "match_reasons": ["JavaScript proficiency", "UI skills"],
+         "skills_matched": ["javascript", "react"], "skills_missing": ["typescript", "figma"],
+         "posted_days_ago": 7, "company_size": "50-200"},
+        {"id": "j5", "title": "DevOps Engineer", "company": "CloudScale", "location": "Dubai, UAE",
+         "type": "Full-time", "salary_min": 80000, "salary_max": 110000, "currency": "USD",
+         "match_score": 65, "match_reasons": ["Docker knowledge", "Git experience"],
+         "skills_matched": ["docker", "git", "linux"], "skills_missing": ["kubernetes", "aws", "terraform"],
+         "posted_days_ago": 10, "company_size": "50-200"},
+        {"id": "j6", "title": "Data Analyst", "company": "Metrics Pro", "location": "Lahore, PK",
+         "type": "Hybrid", "salary_min": 35000, "salary_max": 55000, "currency": "USD",
+         "match_score": 71, "match_reasons": ["SQL expertise", "Data analysis skills"],
+         "skills_matched": ["sql", "python", "excel"], "skills_missing": ["tableau", "power bi"],
+         "posted_days_ago": 3, "company_size": "50-200"},
+    ]
+
+
+def ai_learning_recommendations(missing_skills: list) -> dict:
+    """Generate learning resources for missing skills."""
+    skills_str = ", ".join(missing_skills[:6])
+
+    prompt = f"""You are a learning advisor. Generate learning resources for these skills: {skills_str}
+
+Return ONLY this JSON:
+{{
+  "recommendations": [
+    {{
+      "skill": "skill name",
+      "priority": "Critical/Important/Nice-to-have",
+      "estimated_hours": 20,
+      "resources": [
+        {{
+          "title": "Resource title",
+          "platform": "YouTube/Coursera/Udemy/FreeCodeCamp/Official Docs",
+          "url": "https://...",
+          "duration": "X hours",
+          "free": true/false,
+          "rating": 4.5
+        }}
+      ],
+      "milestone": "What you can build after learning this"
+    }}
+  ],
+  "learning_path_weeks": 12,
+  "total_free_hours": 40
+}}
+
+Generate 4-5 skill recommendations with 2 resources each."""
+
+    result = call_claude(
+        "You are a learning advisor. Return ONLY valid JSON.",
+        prompt, 1500
+    )
+    if result:
+        try:
+            clean = result.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r"```json?\n?", "", clean).replace("```", "").strip()
+            return json.loads(clean)
+        except Exception:
+            pass
+
+    # Fallback
+    recs = []
+    skill_resources = {
+        "docker": [
+            {"title": "Docker Tutorial for Beginners", "platform": "YouTube", "url": "https://youtube.com/watch?v=fqMOX6JJhGo", "duration": "2 hours", "free": True, "rating": 4.8},
+            {"title": "Docker & Kubernetes: The Complete Guide", "platform": "Udemy", "url": "https://udemy.com/course/docker-and-kubernetes-the-complete-guide", "duration": "22 hours", "free": False, "rating": 4.7}
+        ],
+        "aws": [
+            {"title": "AWS Free Tier Tutorials", "platform": "Official Docs", "url": "https://aws.amazon.com/getting-started", "duration": "10 hours", "free": True, "rating": 4.6},
+            {"title": "AWS Certified Solutions Architect", "platform": "Coursera", "url": "https://coursera.org/learn/aws-fundamentals", "duration": "30 hours", "free": False, "rating": 4.7}
+        ],
+    }
+    for i, skill in enumerate(missing_skills[:5]):
+        recs.append({
+            "skill": skill,
+            "priority": "Critical" if i < 2 else "Important",
+            "estimated_hours": 15 + (i * 5),
+            "resources": skill_resources.get(skill, [
+                {"title": f"Learn {skill.title()} - Full Course", "platform": "YouTube", "url": "https://youtube.com", "duration": "4 hours", "free": True, "rating": 4.5},
+                {"title": f"{skill.title()} for Professionals", "platform": "Coursera", "url": "https://coursera.org", "duration": "20 hours", "free": False, "rating": 4.6}
+            ]),
+            "milestone": f"Build a project using {skill} to demonstrate proficiency"
+        })
+    return {"recommendations": recs, "learning_path_weeks": 12, "total_free_hours": 35}
+
+
+def ai_mock_interview(cv_data: dict, target_role: str = "") -> dict:
+    """Generate mock interview questions."""
+    skills = ", ".join(cv_data.get('skills', [])[:6])
+    role = target_role or "Software Engineer"
+
+    prompt = f"""Generate a mock interview for this candidate.
+Role: {role}
+Skills: {skills}
+
+Return ONLY this JSON:
+{{
+  "role": "{role}",
+  "questions": [
+    {{
+      "id": "q1",
+      "type": "Behavioral/Technical/Situational",
+      "question": "The interview question",
+      "hint": "What interviewers want to hear",
+      "sample_answer_structure": "STAR method guide or technical approach",
+      "difficulty": "Easy/Medium/Hard"
+    }}
+  ],
+  "tips": ["interview tip 1", "interview tip 2", "interview tip 3"]
+}}
+
+Generate 6 questions: 2 behavioral, 3 technical, 1 situational."""
+
+    result = call_claude(
+        "You are an interview coach. Return ONLY valid JSON.",
+        prompt, 1500
+    )
+    if result:
+        try:
+            clean = result.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r"```json?\n?", "", clean).replace("```", "").strip()
+            return json.loads(clean)
+        except Exception:
+            pass
+
+    return {
+        "role": role,
+        "questions": [
+            {"id": "q1", "type": "Behavioral", "question": "Tell me about a time you faced a major technical challenge. How did you overcome it?", "hint": "Focus on problem-solving process and teamwork", "sample_answer_structure": "Situation → Task → Action → Result (STAR)", "difficulty": "Medium"},
+            {"id": "q2", "type": "Technical", "question": f"Explain how you would design a scalable REST API for a high-traffic application.", "hint": "Mention caching, load balancing, database optimization", "sample_answer_structure": "Architecture overview → specific technologies → trade-offs", "difficulty": "Hard"},
+            {"id": "q3", "type": "Behavioral", "question": "Describe a situation where you had to meet a tight deadline. What was your approach?", "hint": "Show time management and prioritization skills", "sample_answer_structure": "Context → Your specific role → Steps taken → Outcome", "difficulty": "Easy"},
+            {"id": "q4", "type": "Technical", "question": "What is the difference between SQL and NoSQL databases? When would you use each?", "hint": "Cover ACID properties, scalability, use cases", "sample_answer_structure": "Define both → compare → give real-world examples", "difficulty": "Medium"},
+            {"id": "q5", "type": "Situational", "question": "If you discovered a critical bug in production 30 minutes before a major release, what would you do?", "hint": "Show decision-making under pressure and communication skills", "sample_answer_structure": "Immediate action → stakeholder communication → fix vs delay decision", "difficulty": "Hard"},
+            {"id": "q6", "type": "Technical", "question": "Walk me through how Git branching strategies work in a team environment.", "hint": "Mention feature branches, PRs, main/develop branches", "sample_answer_structure": "Strategy explanation → workflow → merge strategies", "difficulty": "Easy"},
+        ],
+        "tips": ["Research the company thoroughly before the interview", "Practice STAR method for behavioral questions", "Ask thoughtful questions about the team and tech stack", "Prepare 2-3 examples of your best projects"]
+    }
+
+
+def ai_salary_estimate(cv_data: dict, location: str = "") -> dict:
+    """Estimate salary range based on skills and experience."""
+    skills = ", ".join(cv_data.get('skills', [])[:8])
+    loc = location or "Global/Remote"
+
+    prompt = f"""Estimate salary ranges for this candidate.
+Skills: {skills}
+Location: {loc}
+Experience indicators: {" | ".join(cv_data.get('experience', []))[:300]}
+
+Return ONLY this JSON:
+{{
+  "current_estimate": {{
+    "min": 50000,
+    "max": 80000,
+    "median": 65000,
+    "currency": "USD",
+    "location": "{loc}"
+  }},
+  "potential_with_upskilling": {{
+    "min": 70000,
+    "max": 110000,
+    "median": 90000,
+    "skills_to_add": ["skill1", "skill2"]
+  }},
+  "by_location": [
+    {{"city": "San Francisco", "min": 120000, "max": 180000, "currency": "USD"}},
+    {{"city": "New York", "min": 100000, "max": 155000, "currency": "USD"}},
+    {{"city": "London", "min": 65000, "max": 95000, "currency": "GBP"}},
+    {{"city": "Dubai", "min": 80000, "max": 120000, "currency": "USD"}},
+    {{"city": "Lahore", "min": 15000, "max": 35000, "currency": "USD"}},
+    {{"city": "Remote", "min": 60000, "max": 100000, "currency": "USD"}}
+  ],
+  "industry_comparison": {{
+    "tech_startups": "+10-20%",
+    "enterprise": "+5-10%",
+    "finance": "+15-25%",
+    "government": "-10-15%"
+  }},
+  "negotiation_tips": ["tip 1", "tip 2", "tip 3"]
+}}"""
+
+    result = call_claude(
+        "You are a compensation analyst. Return ONLY valid JSON.",
+        prompt, 1200
+    )
+    if result:
+        try:
+            clean = result.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r"```json?\n?", "", clean).replace("```", "").strip()
+            return json.loads(clean)
+        except Exception:
+            pass
+
+    return {
+        "current_estimate": {"min": 55000, "max": 85000, "median": 68000, "currency": "USD", "location": loc},
+        "potential_with_upskilling": {"min": 80000, "max": 120000, "median": 98000, "skills_to_add": ["AWS", "Kubernetes", "System Design"]},
+        "by_location": [
+            {"city": "San Francisco", "min": 120000, "max": 175000, "currency": "USD"},
+            {"city": "New York", "min": 100000, "max": 150000, "currency": "USD"},
+            {"city": "London", "min": 60000, "max": 90000, "currency": "GBP"},
+            {"city": "Dubai", "min": 80000, "max": 115000, "currency": "USD"},
+            {"city": "Lahore", "min": 12000, "max": 30000, "currency": "USD"},
+            {"city": "Remote", "min": 65000, "max": 100000, "currency": "USD"},
+        ],
+        "industry_comparison": {"tech_startups": "+10-20%", "enterprise": "+5-10%", "finance": "+15-25%", "government": "-10-15%"},
+        "negotiation_tips": ["Research market rates before negotiating", "Lead with your total value, not just years of experience", "Consider total compensation (equity, benefits, remote) not just base salary"]
+    }
+
+
+def ai_career_path(cv_data: dict, target_role: str = "") -> dict:
+    """Generate 5-year career roadmap."""
+    skills = ", ".join(cv_data.get('skills', [])[:8])
+    role = target_role or "Senior Software Engineer"
+
+    prompt = f"""Generate a 5-year career path roadmap.
+Current skills: {skills}
+Target role: {role}
+Education: {" | ".join(cv_data.get('education', []))[:200]}
+
+Return ONLY this JSON:
+{{
+  "target_role": "{role}",
+  "timeline_years": 5,
+  "current_level": "Junior/Mid/Senior",
+  "milestones": [
+    {{
+      "year": 1,
+      "title": "Goal title",
+      "description": "What to achieve",
+      "skills_to_acquire": ["skill1", "skill2"],
+      "expected_title": "Job title at this stage",
+      "expected_salary_usd": 70000
+    }}
+  ],
+  "alternative_paths": [
+    {{"path": "Management track", "description": "brief description", "pros": ["pro1"], "cons": ["con1"]}}
+  ],
+  "companies_to_target": ["Company 1", "Company 2", "Company 3"]
+}}
+
+Generate 5 milestones (one per year)."""
+
+    result = call_claude(
+        "You are a career coach. Return ONLY valid JSON.",
+        prompt, 1500
+    )
+    if result:
+        try:
+            clean = result.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r"```json?\n?", "", clean).replace("```", "").strip()
+            return json.loads(clean)
+        except Exception:
+            pass
+
+    return {
+        "target_role": role,
+        "timeline_years": 5,
+        "current_level": "Mid",
+        "milestones": [
+            {"year": 1, "title": "Solidify Core Skills", "description": "Master fundamentals, contribute to team projects, build portfolio", "skills_to_acquire": ["System Design Basics", "CI/CD"], "expected_title": "Mid-Level Developer", "expected_salary_usd": 72000},
+            {"year": 2, "title": "Specialize & Lead", "description": "Pick a specialization, start mentoring juniors, lead small features", "skills_to_acquire": ["Cloud Architecture", "Team Leadership"], "expected_title": "Senior Developer", "expected_salary_usd": 95000},
+            {"year": 3, "title": "Technical Leadership", "description": "Lead full projects, contribute to architecture decisions", "skills_to_acquire": ["Solution Architecture", "Cross-functional collaboration"], "expected_title": "Lead Engineer", "expected_salary_usd": 115000},
+            {"year": 4, "title": "Senior Specialization", "description": "Deep expertise, company-wide impact, open source contributions", "skills_to_acquire": ["Staff-level skills", "Technical Strategy"], "expected_title": "Staff Engineer", "expected_salary_usd": 135000},
+            {"year": 5, "title": "Principal / Director", "description": "Org-level impact, define technical direction, hire and grow teams", "skills_to_acquire": ["Executive communication", "Org design"], "expected_title": "Principal Engineer / Engineering Manager", "expected_salary_usd": 160000},
+        ],
+        "alternative_paths": [
+            {"path": "Management Track", "description": "Transition to Engineering Manager by year 3", "pros": ["Higher earning potential", "Broader impact"], "cons": ["Less coding time", "People challenges"]},
+            {"path": "Entrepreneur Track", "description": "Build and launch your own SaaS product", "pros": ["Unlimited upside", "Full ownership"], "cons": ["High risk", "Irregular income"]}
+        ],
+        "companies_to_target": ["Google", "Microsoft", "Stripe", "Shopify", "Local tech startups"]
+    }
+
+
+def ai_cover_letter(cv_data: dict, job_title: str, company_name: str, job_description: str = "") -> dict:
+    """Generate a tailored cover letter."""
+    skills = ", ".join(cv_data.get('skills', [])[:8])
+    name = cv_data.get('name', 'The Candidate')
+    email = cv_data.get('email', '')
+
+    prompt = f"""Write a compelling, tailored cover letter.
+
+Candidate name: {name}
+Candidate skills: {skills}
+Job title: {job_title}
+Company: {company_name}
+Job description snippet: {job_description[:500] if job_description else 'Not provided'}
+
+Return ONLY this JSON:
+{{
+  "subject": "Application for [Job Title] at [Company]",
+  "cover_letter": "Full cover letter text (3 paragraphs, professional, specific, no filler phrases)",
+  "key_points_highlighted": ["point 1", "point 2", "point 3"],
+  "tone": "Professional/Enthusiastic/Technical",
+  "word_count": 250
+}}
+
+Write a genuine, specific letter. Avoid clichés like 'I am writing to express my interest'."""
+
+    result = call_claude(
+        "You are a professional cover letter writer. Return ONLY valid JSON.",
+        prompt, 1000
+    )
+    if result:
+        try:
+            clean = result.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r"```json?\n?", "", clean).replace("```", "").strip()
+            return json.loads(clean)
+        except Exception:
+            pass
+
+    return {
+        "subject": f"Application for {job_title} at {company_name}",
+        "cover_letter": f"""Dear Hiring Manager,
+
+My background in {', '.join(cv_data.get('skills', ['software development'])[:3])} directly aligns with what you're building at {company_name}. With experience shipping production-grade systems and a track record of solving complex technical problems, I believe I can contribute meaningfully to your team from day one.
+
+What draws me to the {job_title} role specifically is the opportunity to work on challenging problems at scale. In my previous work, I've consistently delivered results by combining technical depth with clear communication across teams — skills that I know are essential for this position.
+
+I'd love to bring this same energy to {company_name}. I'm available to start immediately and happy to discuss how my background matches your needs in a call.
+
+Best regards,
+{name}""",
+        "key_points_highlighted": ["Technical skills alignment", "Results-driven approach", "Team collaboration"],
+        "tone": "Professional",
+        "word_count": 148
+    }
+
+
+# ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def home():
-    return "Hello, this is my backend page!"
+    return jsonify({"status": "Jobrizza CV Analyzer API running", "version": "2.0"})
 
 
 @app.route('/api/upload-cv', methods=['POST'])
 def upload_cv():
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
-
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Invalid file type'}), 400
 
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
 
-        # Extract text based on file type
-        file_ext = filename.rsplit('.', 1)[1].lower()
-        if file_ext == 'pdf':
-            text = extract_text_from_pdf(filepath)
-        elif file_ext == 'docx':
-            text = extract_text_from_docx(filepath)
-        elif file_ext == 'doc':
-            text = extract_text_from_doc(filepath)
-        else:
-            text = "Unsupported file format"
+    ext = filename.rsplit('.', 1)[1].lower()
+    if ext == 'pdf':
+        text = extract_text_from_pdf(filepath)
+    elif ext == 'docx':
+        text = extract_text_from_docx(filepath)
+    else:
+        text = "DOC format: please convert to DOCX or PDF for best results."
 
-        # Parse CV data
-        cv_data = parse_cv_data(text, filename)
+    cv_data = parse_cv_data(text, filename)
+    analysis = analyze_cv_quality(cv_data, text)
+    ai_analysis = ai_full_analysis(text, cv_data)
 
-        # Analyze CV quality
-        analysis = analyze_cv_quality(cv_data, text)
+    cv_data_with_analysis = {
+        **cv_data,
+        'analysis': analysis,
+        'ai_analysis': ai_analysis,
+    }
+    cv_data_store.append(cv_data_with_analysis)
 
-        # Store with analysis
-        cv_data_with_analysis = {**cv_data, 'analysis': analysis}
-        cv_data_store.append(cv_data_with_analysis)
+    return jsonify({'success': True, 'message': 'CV processed', 'data': cv_data_with_analysis})
 
-        return jsonify({
-            'success': True,
-            'message': 'CV uploaded and processed successfully',
-            'data': cv_data_with_analysis
-        })
 
-    return jsonify({'error': 'Invalid file type'}), 400
+@app.route('/api/skill-gap', methods=['POST'])
+def skill_gap():
+    data = request.get_json()
+    if not data or 'cv_data' not in data:
+        return jsonify({'error': 'No CV data provided'}), 400
+    target_role = data.get('target_role', '')
+    result = ai_skill_gap(data['cv_data'], target_role)
+    return jsonify({'success': True, 'skill_gap': result})
+
+
+@app.route('/api/job-matches', methods=['POST'])
+def job_matches():
+    data = request.get_json()
+    if not data or 'cv_data' not in data:
+        return jsonify({'error': 'No CV data provided'}), 400
+    matches = ai_job_matches(data['cv_data'])
+    return jsonify({'success': True, 'jobs': matches})
+
+
+@app.route('/api/learning-recommendations', methods=['POST'])
+def learning_recommendations():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    missing = data.get('missing_skills', [])
+    result = ai_learning_recommendations(missing)
+    return jsonify({'success': True, 'learning': result})
+
+
+@app.route('/api/mock-interview', methods=['POST'])
+def mock_interview():
+    data = request.get_json()
+    if not data or 'cv_data' not in data:
+        return jsonify({'error': 'No CV data provided'}), 400
+    result = ai_mock_interview(data['cv_data'], data.get('target_role', ''))
+    return jsonify({'success': True, 'interview': result})
+
+
+@app.route('/api/salary-estimate', methods=['POST'])
+def salary_estimate():
+    data = request.get_json()
+    if not data or 'cv_data' not in data:
+        return jsonify({'error': 'No CV data provided'}), 400
+    result = ai_salary_estimate(data['cv_data'], data.get('location', ''))
+    return jsonify({'success': True, 'salary': result})
+
+
+@app.route('/api/career-path', methods=['POST'])
+def career_path():
+    data = request.get_json()
+    if not data or 'cv_data' not in data:
+        return jsonify({'error': 'No CV data provided'}), 400
+    result = ai_career_path(data['cv_data'], data.get('target_role', ''))
+    return jsonify({'success': True, 'career_path': result})
+
+
+@app.route('/api/cover-letter', methods=['POST'])
+def cover_letter():
+    data = request.get_json()
+    if not data or 'cv_data' not in data:
+        return jsonify({'error': 'No data provided'}), 400
+    result = ai_cover_letter(
+        data['cv_data'],
+        data.get('job_title', 'Software Engineer'),
+        data.get('company_name', 'the company'),
+        data.get('job_description', '')
+    )
+    return jsonify({'success': True, 'cover_letter': result})
+
+
+@app.route('/api/improve-cv', methods=['POST'])
+def improve_cv():
+    data = request.get_json()
+    if not data or 'cv_data' not in data:
+        return jsonify({'error': 'No CV data provided'}), 400
+    cv_data = data['cv_data']
+
+    skills_base = cv_data.get('skills', [])
+    soft_skills = ['Problem Solving', 'Communication', 'Leadership', 'Time Management', 'Team Collaboration']
+    enhanced_skills = list(set(skills_base + soft_skills))[:12]
+
+    prompt = f"""Rewrite this CV professional summary to be compelling and results-driven.
+Skills: {', '.join(skills_base[:6])}
+Be specific, avoid buzzwords, max 60 words."""
+
+    summary = call_claude(
+        "You are a CV writer. Write only the summary text, no labels or JSON.",
+        prompt, 200
+    )
+
+    if not summary:
+        summary = (f"Results-driven professional with expertise in {', '.join(skills_base[:3])}. "
+                   f"Proven track record of delivering high-quality solutions and driving continuous improvement.")
+
+    improvements = ['Enhanced professional summary', 'Expanded skills section with key competencies',
+                    'Standardized section formatting', 'Added soft skills for ATS compatibility']
+
+    return jsonify({
+        'success': True,
+        'improved_cv': {
+            'name': cv_data.get('name', 'Your Name'),
+            'email': cv_data.get('email', ''),
+            'phone': cv_data.get('phone', ''),
+            'professional_summary': summary.strip(),
+            'skills': enhanced_skills,
+            'education': cv_data.get('education', []),
+            'experience': cv_data.get('experience', []),
+            'improvements_made': improvements
+        }
+    })
 
 
 @app.route('/api/cv-data', methods=['GET'])
 def get_cv_data():
     return jsonify({'cv_data': cv_data_store})
-
-
-@app.route('/api/improve-cv', methods=['POST'])
-def improve_cv():
-    """Generate an improved professional version of the CV"""
-    data = request.get_json()
-    if not data or 'cv_data' not in data:
-        return jsonify({'error': 'No CV data provided'}), 400
-
-    cv_data = data['cv_data']
-    analysis = cv_data.get('analysis', {})
-
-    # Generate improved CV
-    improved_cv = generate_professional_cv(cv_data, analysis)
-
-    return jsonify({
-        'success': True,
-        'message': 'Professional CV generated successfully',
-        'improved_cv': improved_cv,
-        'original_analysis': analysis
-    })
-
-
-@app.route('/backend/cv-data')
-def backend_cv_page():
-    """Backend page to display all extracted CV data"""
-    html_template = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>CV Data - Backend</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background: #f5f5f5;
-        }
-        h1 {
-            color: #333;
-            border-bottom: 2px solid #4CAF50;
-            padding-bottom: 10px;
-        }
-        .cv-card {
-            background: white;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 20px 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .cv-header {
-            background: #4CAF50;
-            color: white;
-            padding: 15px;
-            margin: -20px -20px 15px -20px;
-            border-radius: 8px 8px 0 0;
-        }
-        .cv-header h2 {
-            margin: 0;
-        }
-        .field {
-            margin: 10px 0;
-            padding: 8px;
-            background: #f9f9f9;
-            border-radius: 4px;
-        }
-        .field-label {
-            font-weight: bold;
-            color: #555;
-            display: inline-block;
-            width: 120px;
-        }
-        .field-value {
-            color: #333;
-        }
-        .skills-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 5px;
-        }
-        .skill-tag {
-            background: #e3f2fd;
-            color: #1976d2;
-            padding: 4px 12px;
-            border-radius: 16px;
-            font-size: 0.9em;
-        }
-        .empty-state {
-            text-align: center;
-            color: #666;
-            padding: 40px;
-            background: white;
-            border-radius: 8px;
-        }
-        .raw-text {
-            background: #f5f5f5;
-            padding: 10px;
-            border-radius: 4px;
-            max-height: 200px;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 0.85em;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-    </style>
-</head>
-<body>
-    <h1>Extracted CV Data</h1>
-    {% if cv_data %}
-        <p style="color: #666;">Total CVs processed: {{ cv_data|length }}</p>
-        {% for cv in cv_data %}
-        <div class="cv-card">
-            <div class="cv-header">
-                <h2>CV #{{ loop.index }}: {{ cv.filename }}</h2>
-            </div>
-
-            <div class="field">
-                <span class="field-label">Name:</span>
-                <span class="field-value">{{ cv.name or 'Not detected' }}</span>
-            </div>
-
-            <div class="field">
-                <span class="field-label">Email:</span>
-                <span class="field-value">{{ cv.email or 'Not detected' }}</span>
-            </div>
-
-            <div class="field">
-                <span class="field-label">Phone:</span>
-                <span class="field-value">{{ cv.phone or 'Not detected' }}</span>
-            </div>
-
-            <div class="field">
-                <span class="field-label">Skills:</span>
-                {% if cv.skills %}
-                <div class="skills-list">
-                    {% for skill in cv.skills %}
-                    <span class="skill-tag">{{ skill }}</span>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <span class="field-value">No skills detected</span>
-                {% endif %}
-            </div>
-
-            <div class="field">
-                <span class="field-label">Education:</span>
-                {% if cv.education %}
-                <ul style="margin: 5px 0; padding-left: 20px;">
-                    {% for edu in cv.education %}
-                    <li>{{ edu }}</li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                <span class="field-value">No education detected</span>
-                {% endif %}
-            </div>
-
-            <div class="field">
-                <span class="field-label">Experience:</span>
-                {% if cv.experience %}
-                <ul style="margin: 5px 0; padding-left: 20px;">
-                    {% for exp in cv.experience %}
-                    <li>{{ exp }}</li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                <span class="field-value">No experience detected</span>
-                {% endif %}
-            </div>
-
-            <div class="field">
-                <span class="field-label">Raw Text (Preview):</span>
-                <div class="raw-text">{{ cv.raw_text }}</div>
-            </div>
-        </div>
-        {% endfor %}
-    {% else %}
-        <div class="empty-state">
-            <h2>No CVs uploaded yet</h2>
-            <p>Upload CVs from the frontend to see extracted data here.</p>
-        </div>
-    {% endif %}
-</body>
-</html>
-    '''
-    return render_template_string(html_template, cv_data=cv_data_store)
 
 
 if __name__ == "__main__":

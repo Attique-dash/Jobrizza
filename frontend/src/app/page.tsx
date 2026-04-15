@@ -322,9 +322,9 @@ export default function LandingPage() {
             <Image
               src="/images/logo.png"
               alt="Jobrizza logo"
-              width={160}
-              height={160}
-              className="h-14 w-auto sm:h-16 md:h-20 object-contain"
+              width={240}
+              height={80}
+              className="h-16 w-auto sm:h-20 md:h-24 object-contain"
               priority
             />
           </Link>
@@ -686,13 +686,13 @@ export default function LandingPage() {
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808005_1px,transparent_1px),linear-gradient(to_bottom,#80808005_1px,transparent_1px)] bg-[size:24px_24px]" aria-hidden="true" />
         <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-8 px-4 text-xs text-slate-500 sm:flex-row sm:justify-between">
           <div className="flex items-center gap-3">
-            <div className="relative h-10 w-10 flex items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-white to-slate-50 p-1 shadow-md ring-1 ring-slate-200/50">
-              <Image 
-                src="/images/logo.png" 
-                alt="Jobrizza logo" 
-                width={32} 
-                height={32} 
-                className="h-full w-full object-contain object-center" 
+            <div className="relative h-12 w-12 flex items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-white to-slate-50 p-1 shadow-md ring-1 ring-slate-200/50">
+              <Image
+                src="/images/logo.png"
+                alt="Jobrizza logo"
+                width={48}
+                height={48}
+                className="h-full w-full object-contain object-center"
               />
             </div>
             <span className="font-medium text-slate-600">Jobrizza <span className="text-slate-300">•</span> AI co-pilot for recruiters</span>
