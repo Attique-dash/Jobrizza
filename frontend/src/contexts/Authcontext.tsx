@@ -1,6 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useEffect, useState } from 'react'
+import { useSession, signIn, signOut, getSession } from 'next-auth/react'
 
 export interface User {
   id: string
@@ -8,12 +9,11 @@ export interface User {
   email: string
   userType: 'candidate' | 'company'
   avatar?: string
-  createdAt: string
+  createdAt?: string
 }
 
 interface AuthContextType {
   user: User | null
-  token: string | null
   loading: boolean
   login: (email: string, password: string, userType: 'candidate' | 'company') => Promise<void>
   register: (name: string, email: string, password: string, userType: 'candidate' | 'company') => Promise<void>
@@ -23,7 +23,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
-  token: null,
   loading: true,
   login: async () => {},
   register: async () => {},
@@ -31,72 +30,58 @@ const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
 })
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { data: session, status } = useSession()
   const [user, setUser] = useState<User | null>(null)
-  const [token, setToken] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const loading = status === 'loading'
 
   useEffect(() => {
-    // Restore session from localStorage
-    try {
-      const storedToken = localStorage.getItem('jobrizza-token')
-      const storedUser = localStorage.getItem('jobrizza-user')
-      if (storedToken && storedUser) {
-        setToken(storedToken)
-        setUser(JSON.parse(storedUser))
-      }
-    } catch (e) {
-      console.error('Failed to restore session', e)
-    } finally {
-      setLoading(false)
+    if (session?.user) {
+      setUser({
+        id: session.user.id,
+        name: session.user.name || '',
+        email: session.user.email || '',
+        userType: session.user.userType as 'candidate' | 'company',
+        avatar: session.user.avatar,
+      })
+    } else {
+      setUser(null)
     }
-  }, [])
+  }, [session])
 
   const login = async (email: string, password: string, userType: 'candidate' | 'company') => {
-    const res = await fetch(`${API_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, userType }),
+    const result = await signIn('credentials', {
+      email,
+      password,
+      userType,
+      redirect: false,
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error || 'Login failed')
-    persist(data.token, data.user)
+
+    if (result?.error) {
+      throw new Error(result.error)
+    }
   }
 
   const register = async (name: string, email: string, password: string, userType: 'candidate' | 'company') => {
-    const res = await fetch(`${API_URL}/api/auth/register`, {
+    const res = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, email, password, userType }),
     })
+
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Registration failed')
-    persist(data.token, data.user)
-  }
 
-  const persist = (newToken: string, newUser: User) => {
-    setToken(newToken)
-    setUser(newUser)
-    localStorage.setItem('jobrizza-token', newToken)
-    localStorage.setItem('jobrizza-user', JSON.stringify(newUser))
-    // Set cookie for middleware
-    document.cookie = `jobrizza-token=${newToken}; path=/; max-age=${7 * 24 * 60 * 60}`
-    document.cookie = `userType=${newUser.userType}; path=/; max-age=${7 * 24 * 60 * 60}`
+    // Auto login after registration
+    await login(email, password, userType)
   }
 
   const logout = () => {
-    setToken(null)
-    setUser(null)
-    localStorage.removeItem('jobrizza-token')
-    localStorage.removeItem('jobrizza-user')
-    document.cookie = 'jobrizza-token=; path=/; max-age=0'
-    document.cookie = 'userType=; path=/; max-age=0'
+    signOut({ callbackUrl: '/' })
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, isAuthenticated: !!user }}>
       {children}
     </AuthContext.Provider>
   )

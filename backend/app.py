@@ -1,8 +1,10 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import re
 import json
+import uuid
+import hashlib
 from werkzeug.utils import secure_filename
 
 try:
@@ -32,6 +34,10 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 cv_data_store = []
+
+# In-memory user store (replace with a real database in production)
+users_store: dict[str, dict] = {}
+
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -63,6 +69,10 @@ def call_claude(system_prompt: str, user_prompt: str, max_tokens: int = 1500) ->
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
 
 def extract_text_from_pdf(filepath):
@@ -123,7 +133,7 @@ def parse_cv_data(text: str, filename: str) -> dict:
         'pytorch', 'data analysis', 'tableau', 'power bi', 'excel', 'pandas',
         'numpy', 'scikit-learn', 'rest api', 'graphql', 'microservices',
         'project management', 'leadership', 'communication', 'problem solving',
-        'teamwork', 'agile', 'devops', 'linux', 'figma', 'photoshop',
+        'teamwork', 'devops', 'linux', 'figma', 'photoshop',
     ]
     text_lower = text.lower()
     data['skills'] = [s for s in common_skills if s in text_lower]
@@ -300,7 +310,6 @@ def analyze_cv_quality(cv_data: dict, text: str) -> dict:
 # ─── AI-powered analysis ──────────────────────────────────────────────────────
 
 def ai_full_analysis(text: str, cv_data: dict) -> dict:
-    """Run full AI analysis: ATS score, mistake detector, template suggestion."""
     prompt = f"""You are an expert CV/resume analyst. Analyze this CV and return ONLY valid JSON.
 
 CV TEXT:
@@ -346,7 +355,6 @@ Return this exact JSON structure:
         except Exception:
             pass
 
-    # Fallback
     return {
         "ats_score": {
             "score": 62,
@@ -373,7 +381,6 @@ Return this exact JSON structure:
 
 
 def ai_skill_gap(cv_data: dict, target_role: str = "") -> dict:
-    """Analyze skill gaps against job market demand."""
     skills_str = ", ".join(cv_data.get('skills', []))
     role = target_role or "Software Engineer"
 
@@ -398,10 +405,7 @@ Return ONLY this JSON:
   "quick_wins": ["skills that could be learned in under 2 weeks"]
 }}"""
 
-    result = call_claude(
-        "You are a career advisor. Return ONLY valid JSON.",
-        prompt, 1200
-    )
+    result = call_claude("You are a career advisor. Return ONLY valid JSON.", prompt, 1200)
     if result:
         try:
             clean = result.strip()
@@ -427,9 +431,7 @@ Return ONLY this JSON:
 
 
 def ai_job_matches(cv_data: dict) -> list:
-    """Generate realistic job matches based on CV."""
     skills_str = ", ".join(cv_data.get('skills', [])[:8])
-    name = cv_data.get('name', 'Candidate')
 
     prompt = f"""You are a job matching engine. Generate 6 realistic job matches.
 
@@ -458,10 +460,7 @@ Return ONLY this JSON array:
 
 Generate 6 jobs with realistic companies and varying match scores (55-96%)."""
 
-    result = call_claude(
-        "You are a job matching AI. Return ONLY a valid JSON array.",
-        prompt, 1500
-    )
+    result = call_claude("You are a job matching AI. Return ONLY a valid JSON array.", prompt, 1500)
     if result:
         try:
             clean = result.strip()
@@ -506,7 +505,6 @@ Generate 6 jobs with realistic companies and varying match scores (55-96%)."""
 
 
 def ai_learning_recommendations(missing_skills: list) -> dict:
-    """Generate learning resources for missing skills."""
     skills_str = ", ".join(missing_skills[:6])
 
     prompt = f"""You are a learning advisor. Generate learning resources for these skills: {skills_str}
@@ -537,10 +535,7 @@ Return ONLY this JSON:
 
 Generate 4-5 skill recommendations with 2 resources each."""
 
-    result = call_claude(
-        "You are a learning advisor. Return ONLY valid JSON.",
-        prompt, 1500
-    )
+    result = call_claude("You are a learning advisor. Return ONLY valid JSON.", prompt, 1500)
     if result:
         try:
             clean = result.strip()
@@ -550,34 +545,22 @@ Generate 4-5 skill recommendations with 2 resources each."""
         except Exception:
             pass
 
-    # Fallback
     recs = []
-    skill_resources = {
-        "docker": [
-            {"title": "Docker Tutorial for Beginners", "platform": "YouTube", "url": "https://youtube.com/watch?v=fqMOX6JJhGo", "duration": "2 hours", "free": True, "rating": 4.8},
-            {"title": "Docker & Kubernetes: The Complete Guide", "platform": "Udemy", "url": "https://udemy.com/course/docker-and-kubernetes-the-complete-guide", "duration": "22 hours", "free": False, "rating": 4.7}
-        ],
-        "aws": [
-            {"title": "AWS Free Tier Tutorials", "platform": "Official Docs", "url": "https://aws.amazon.com/getting-started", "duration": "10 hours", "free": True, "rating": 4.6},
-            {"title": "AWS Certified Solutions Architect", "platform": "Coursera", "url": "https://coursera.org/learn/aws-fundamentals", "duration": "30 hours", "free": False, "rating": 4.7}
-        ],
-    }
     for i, skill in enumerate(missing_skills[:5]):
         recs.append({
             "skill": skill,
             "priority": "Critical" if i < 2 else "Important",
             "estimated_hours": 15 + (i * 5),
-            "resources": skill_resources.get(skill, [
+            "resources": [
                 {"title": f"Learn {skill.title()} - Full Course", "platform": "YouTube", "url": "https://youtube.com", "duration": "4 hours", "free": True, "rating": 4.5},
                 {"title": f"{skill.title()} for Professionals", "platform": "Coursera", "url": "https://coursera.org", "duration": "20 hours", "free": False, "rating": 4.6}
-            ]),
+            ],
             "milestone": f"Build a project using {skill} to demonstrate proficiency"
         })
     return {"recommendations": recs, "learning_path_weeks": 12, "total_free_hours": 35}
 
 
 def ai_mock_interview(cv_data: dict, target_role: str = "") -> dict:
-    """Generate mock interview questions."""
     skills = ", ".join(cv_data.get('skills', [])[:6])
     role = target_role or "Software Engineer"
 
@@ -603,10 +586,7 @@ Return ONLY this JSON:
 
 Generate 6 questions: 2 behavioral, 3 technical, 1 situational."""
 
-    result = call_claude(
-        "You are an interview coach. Return ONLY valid JSON.",
-        prompt, 1500
-    )
+    result = call_claude("You are an interview coach. Return ONLY valid JSON.", prompt, 1500)
     if result:
         try:
             clean = result.strip()
@@ -620,7 +600,7 @@ Generate 6 questions: 2 behavioral, 3 technical, 1 situational."""
         "role": role,
         "questions": [
             {"id": "q1", "type": "Behavioral", "question": "Tell me about a time you faced a major technical challenge. How did you overcome it?", "hint": "Focus on problem-solving process and teamwork", "sample_answer_structure": "Situation → Task → Action → Result (STAR)", "difficulty": "Medium"},
-            {"id": "q2", "type": "Technical", "question": f"Explain how you would design a scalable REST API for a high-traffic application.", "hint": "Mention caching, load balancing, database optimization", "sample_answer_structure": "Architecture overview → specific technologies → trade-offs", "difficulty": "Hard"},
+            {"id": "q2", "type": "Technical", "question": "Explain how you would design a scalable REST API for a high-traffic application.", "hint": "Mention caching, load balancing, database optimization", "sample_answer_structure": "Architecture overview → specific technologies → trade-offs", "difficulty": "Hard"},
             {"id": "q3", "type": "Behavioral", "question": "Describe a situation where you had to meet a tight deadline. What was your approach?", "hint": "Show time management and prioritization skills", "sample_answer_structure": "Context → Your specific role → Steps taken → Outcome", "difficulty": "Easy"},
             {"id": "q4", "type": "Technical", "question": "What is the difference between SQL and NoSQL databases? When would you use each?", "hint": "Cover ACID properties, scalability, use cases", "sample_answer_structure": "Define both → compare → give real-world examples", "difficulty": "Medium"},
             {"id": "q5", "type": "Situational", "question": "If you discovered a critical bug in production 30 minutes before a major release, what would you do?", "hint": "Show decision-making under pressure and communication skills", "sample_answer_structure": "Immediate action → stakeholder communication → fix vs delay decision", "difficulty": "Hard"},
@@ -631,7 +611,6 @@ Generate 6 questions: 2 behavioral, 3 technical, 1 situational."""
 
 
 def ai_salary_estimate(cv_data: dict, location: str = "") -> dict:
-    """Estimate salary range based on skills and experience."""
     skills = ", ".join(cv_data.get('skills', [])[:8])
     loc = location or "Global/Remote"
 
@@ -672,10 +651,7 @@ Return ONLY this JSON:
   "negotiation_tips": ["tip 1", "tip 2", "tip 3"]
 }}"""
 
-    result = call_claude(
-        "You are a compensation analyst. Return ONLY valid JSON.",
-        prompt, 1200
-    )
+    result = call_claude("You are a compensation analyst. Return ONLY valid JSON.", prompt, 1200)
     if result:
         try:
             clean = result.strip()
@@ -702,7 +678,6 @@ Return ONLY this JSON:
 
 
 def ai_career_path(cv_data: dict, target_role: str = "") -> dict:
-    """Generate 5-year career roadmap."""
     skills = ", ".join(cv_data.get('skills', [])[:8])
     role = target_role or "Senior Software Engineer"
 
@@ -734,10 +709,7 @@ Return ONLY this JSON:
 
 Generate 5 milestones (one per year)."""
 
-    result = call_claude(
-        "You are a career coach. Return ONLY valid JSON.",
-        prompt, 1500
-    )
+    result = call_claude("You are a career coach. Return ONLY valid JSON.", prompt, 1500)
     if result:
         try:
             clean = result.strip()
@@ -767,10 +739,8 @@ Generate 5 milestones (one per year)."""
 
 
 def ai_cover_letter(cv_data: dict, job_title: str, company_name: str, job_description: str = "") -> dict:
-    """Generate a tailored cover letter."""
     skills = ", ".join(cv_data.get('skills', [])[:8])
     name = cv_data.get('name', 'The Candidate')
-    email = cv_data.get('email', '')
 
     prompt = f"""Write a compelling, tailored cover letter.
 
@@ -791,10 +761,7 @@ Return ONLY this JSON:
 
 Write a genuine, specific letter. Avoid clichés like 'I am writing to express my interest'."""
 
-    result = call_claude(
-        "You are a professional cover letter writer. Return ONLY valid JSON.",
-        prompt, 1000
-    )
+    result = call_claude("You are a professional cover letter writer. Return ONLY valid JSON.", prompt, 1000)
     if result:
         try:
             clean = result.strip()
@@ -822,7 +789,72 @@ Best regards,
     }
 
 
-# ─── Routes ───────────────────────────────────────────────────────────────────
+# ─── Auth Routes ──────────────────────────────────────────────────────────────
+
+@app.route('/api/auth/register', methods=['POST'])
+def auth_register():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+    user_type = data.get('userType', 'candidate')
+
+    if not name or not email or not password:
+        return jsonify({'error': 'Name, email and password are required'}), 400
+
+    if user_type not in ('candidate', 'company'):
+        return jsonify({'error': 'userType must be candidate or company'}), 400
+
+    if email in users_store:
+        return jsonify({'error': 'Email already registered'}), 409
+
+    user_id = str(uuid.uuid4())
+    users_store[email] = {
+        'id': user_id,
+        'name': name,
+        'email': email,
+        'password_hash': hash_password(password),
+        'userType': user_type,
+        'createdAt': __import__('datetime').datetime.utcnow().isoformat(),
+    }
+
+    user_obj = {k: v for k, v in users_store[email].items() if k != 'password_hash'}
+    # Simple token: in production use JWT
+    token = f"token_{user_id}"
+
+    return jsonify({'success': True, 'token': token, 'user': user_obj}), 201
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+    user_type = data.get('userType', 'candidate')
+
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+
+    user = users_store.get(email)
+    if not user or user['password_hash'] != hash_password(password):
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    if user['userType'] != user_type:
+        return jsonify({'error': f'This account is registered as {user["userType"]}, not {user_type}'}), 403
+
+    user_obj = {k: v for k, v in user.items() if k != 'password_hash'}
+    token = f"token_{user['id']}"
+
+    return jsonify({'success': True, 'token': token, 'user': user_obj})
+
+
+# ─── CV Routes ────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def home():
@@ -870,8 +902,7 @@ def skill_gap():
     data = request.get_json()
     if not data or 'cv_data' not in data:
         return jsonify({'error': 'No CV data provided'}), 400
-    target_role = data.get('target_role', '')
-    result = ai_skill_gap(data['cv_data'], target_role)
+    result = ai_skill_gap(data['cv_data'], data.get('target_role', ''))
     return jsonify({'success': True, 'skill_gap': result})
 
 
@@ -889,8 +920,7 @@ def learning_recommendations():
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
-    missing = data.get('missing_skills', [])
-    result = ai_learning_recommendations(missing)
+    result = ai_learning_recommendations(data.get('missing_skills', []))
     return jsonify({'success': True, 'learning': result})
 
 
@@ -959,9 +989,6 @@ Be specific, avoid buzzwords, max 60 words."""
         summary = (f"Results-driven professional with expertise in {', '.join(skills_base[:3])}. "
                    f"Proven track record of delivering high-quality solutions and driving continuous improvement.")
 
-    improvements = ['Enhanced professional summary', 'Expanded skills section with key competencies',
-                    'Standardized section formatting', 'Added soft skills for ATS compatibility']
-
     return jsonify({
         'success': True,
         'improved_cv': {
@@ -972,7 +999,12 @@ Be specific, avoid buzzwords, max 60 words."""
             'skills': enhanced_skills,
             'education': cv_data.get('education', []),
             'experience': cv_data.get('experience', []),
-            'improvements_made': improvements
+            'improvements_made': [
+                'Enhanced professional summary',
+                'Expanded skills section with key competencies',
+                'Standardized section formatting',
+                'Added soft skills for ATS compatibility',
+            ]
         }
     })
 

@@ -1,27 +1,50 @@
-import type { NextRequest } from 'next/server'
+import { withAuth } from 'next-auth/middleware'
 import { NextResponse } from 'next/server'
 
-export function middleware(request: NextRequest) {
-    const userType = request.cookies.get('userType')?.value
-    const { pathname } = request.nextUrl
+export default withAuth(
+  function middleware(req) {
+    const { pathname } = req.nextUrl
+    const userType = req.nextauth.token?.userType
 
     // If trying to access protected routes without auth
-    if (pathname.startsWith('/dashboard') || pathname.startsWith('/company') || pathname.startsWith('/candidate')) {
-        if (!userType) {
-            return NextResponse.redirect(new URL('/auth/login', request.url))
-        }
+    if (pathname.startsWith('/cv-result') || pathname.startsWith('/dashboard') || pathname.startsWith('/company') || pathname.startsWith('/candidate')) {
+      if (!req.nextauth.token) {
+        return NextResponse.redirect(new URL('/login', req.url))
+      }
     }
 
     // If authenticated user tries to access auth pages
-    if (pathname.startsWith('/auth')) {
-        if (userType) {
-            return NextResponse.redirect(new URL(`/${userType}/dashboard`, request.url))
-        }
+    if (pathname.startsWith('/login') || pathname.startsWith('/auth/signup')) {
+      if (req.nextauth.token) {
+        return NextResponse.redirect(new URL('/', req.url))
+      }
     }
 
     return NextResponse.next()
-}
+  },
+  {
+    callbacks: {
+      authorized({ req, token }) {
+        // Protect specific routes
+        if (req.nextUrl.pathname.startsWith('/cv-result') || 
+            req.nextUrl.pathname.startsWith('/dashboard') ||
+            req.nextUrl.pathname.startsWith('/company') || 
+            req.nextUrl.pathname.startsWith('/candidate')) {
+          return token !== null
+        }
+        return true
+      },
+    },
+  }
+)
 
 export const config = {
-    matcher: ['/dashboard/:path*', '/company/:path*', '/candidate/:path*', '/auth/:path*'],
+  matcher: [
+    '/cv-result/:path*',
+    '/dashboard/:path*',
+    '/company/:path*',
+    '/candidate/:path*',
+    '/login',
+    '/auth/signup',
+  ],
 } 

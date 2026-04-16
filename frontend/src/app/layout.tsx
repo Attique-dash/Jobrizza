@@ -4,6 +4,7 @@ import './globals.css'
 import { ThemeProvider } from '@/contexts/Themecontext'
 import { AuthProvider } from '@/contexts/Authcontext'
 import { Chatbot } from '@/components/Chatbot'
+import { SessionProvider } from '@/components/SessionProvider'
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -30,12 +31,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className={`${dmSans.variable} font-sans antialiased`} suppressHydrationWarning>
-        <ThemeProvider>
-          <AuthProvider>
-            {children}
-            <Chatbot />
-          </AuthProvider>
-        </ThemeProvider>
+        <SessionProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              {children}
+              <Chatbot />
+            </AuthProvider>
+          </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   )

@@ -12,19 +12,6 @@ interface Message {
   timestamp: Date
 }
 
-const SYSTEM_PROMPT = `You are Jobby, the friendly AI assistant for Jobrizza — an AI-powered recruitment platform. 
-You help users with:
-- CV/resume writing tips and optimization
-- Job search strategies
-- Interview preparation
-- Understanding ATS (Applicant Tracking Systems)
-- Career advice and roadmaps
-- How to use the Jobrizza platform
-- Explaining CV analysis results
-
-Keep responses concise, friendly, and actionable. Use bullet points for lists.
-If asked about something unrelated to jobs/careers/the platform, politely redirect to your expertise.`
-
 const SUGGESTIONS = [
   'How do I improve my CV?',
   'What is ATS and why does it matter?',
@@ -66,38 +53,44 @@ export function Chatbot() {
     if (!content || loading) return
 
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content, timestamp: new Date() }
-    setMessages(prev => [...prev, userMsg])
+    const updatedMessages = [...messages, userMsg]
+    setMessages(updatedMessages)
     setInput('')
     setLoading(true)
 
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      // Use the proxy API route — never call Anthropic directly from the browser
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          system: SYSTEM_PROMPT,
-          messages: [
-            ...messages.filter(m => m.id !== '0').map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content },
-          ],
+          messages: updatedMessages
+            .filter(m => m.id !== '0')
+            .map(m => ({ role: m.role, content: m.content })),
         }),
       })
 
       const data = await response.json()
-      const reply = data.content?.[0]?.text ?? "Sorry, I couldn't process that. Please try again."
+      const reply = data.reply ?? "Sorry, I couldn't process that. Please try again."
 
-      const assistantMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: reply, timestamp: new Date() }
+      const assistantMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: reply,
+        timestamp: new Date(),
+      }
       setMessages(prev => [...prev, assistantMsg])
       if (!open) setUnread(u => u + 1)
     } catch {
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: "I'm having trouble connecting right now. Please try again in a moment.",
-        timestamp: new Date(),
-      }])
+      setMessages(prev => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: "I'm having trouble connecting right now. Please try again in a moment.",
+          timestamp: new Date(),
+        },
+      ])
     } finally {
       setLoading(false)
     }
