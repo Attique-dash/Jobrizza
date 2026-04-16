@@ -2,11 +2,14 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import Cookies from 'js-cookie'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
+import { useTheme } from '@/contexts/Themecontext'
+import { motion } from 'framer-motion'
 
 const loginSchema = z.object({
     email: z.string().email('Invalid email address'),
@@ -18,15 +21,9 @@ type LoginFormData = z.infer<typeof loginSchema>
 function LoginForm() {
     const router = useRouter()
     const searchParams = useSearchParams()
+    const { isDark } = useTheme()
     const [isLoading, setIsLoading] = useState(false)
-    const [userType, setUserType] = useState<'company' | 'candidate'>('candidate')
-
-    useEffect(() => {
-        const typeFromUrl = searchParams.get('type')
-        if (typeFromUrl === 'company' || typeFromUrl === 'candidate') {
-            setUserType(typeFromUrl)
-        }
-    }, [searchParams])
+    const userType = 'candidate'
 
     const {
         register,
@@ -51,110 +48,132 @@ function LoginForm() {
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-xl">
+        <div className={`min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-300 ${
+            isDark 
+                ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950' 
+                : 'bg-gradient-to-br from-sky-50 via-white to-blue-50'
+        }`}>
+            <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className={`max-w-md w-full space-y-6 p-8 rounded-3xl shadow-2xl border transition-colors duration-300 ${
+                    isDark 
+                        ? 'bg-slate-900/80 border-slate-800 backdrop-blur-xl' 
+                        : 'bg-white/80 border-white/50 backdrop-blur-xl'
+                }`}
+            >
+                {/* Logo */}
+                <div className="flex justify-center">
+                    <Link href="/" className="flex items-center gap-2">
+                        <div className="relative h-12 w-24 overflow-hidden">
+                            <Image
+                                src={isDark ? "/images/logo2.png" : "/images/logo1.png"}
+                                alt="Jobrizza"
+                                width={96}
+                                height={48}
+                                className="h-full w-full object-contain"
+                                priority
+                            />
+                        </div>
+                    </Link>
+                </div>
+
                 <div className="text-center">
-                    <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
+                    <h2 className={`text-2xl font-bold transition-colors ${isDark ? 'text-white' : 'text-slate-900'}`}>
                         Welcome back
                     </h2>
-                    <p className="mt-2 text-sm text-gray-600">
+                    <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         Don&apos;t have an account?{' '}
-                        <Link href="/auth/signup" className="font-medium text-blue-600 hover:text-blue-500">
-                            Sign up
+                        <Link href="/auth/signup" className={`font-semibold transition-colors ${isDark ? 'text-sky-400 hover:text-sky-300' : 'text-sky-600 hover:text-sky-500'}`}>
+                            Sign up as Candidate
                         </Link>
                     </p>
                 </div>
 
-                {/* User Type Selection */}
-                <div className="flex justify-center">
-                    <div className="relative rounded-full bg-gray-100 p-1">
-                        <div className="flex">
-                            <button
-                                onClick={() => setUserType('candidate')}
-                                className={`${userType === 'candidate'
-                                    ? 'bg-white shadow-sm'
-                                    : 'text-gray-500'
-                                    } relative rounded-full px-6 py-2 text-sm font-medium transition-all duration-200`}
-                            >
-                                Candidate
-                            </button>
-                            <button
-                                onClick={() => setUserType('company')}
-                                className={`${userType === 'company'
-                                    ? 'bg-white shadow-sm'
-                                    : 'text-gray-500'
-                                    } relative rounded-full px-6 py-2 text-sm font-medium transition-all duration-200`}
-                            >
-                                Company
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
                 {/* Social Login */}
-                <div className="mt-6">
+                <div>
                     <div className="relative">
                         <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-gray-300" />
+                            <div className={`w-full border-t ${isDark ? 'border-slate-700' : 'border-slate-200'}`} />
                         </div>
                         <div className="relative flex justify-center text-sm">
-                            <span className="px-2 bg-white text-gray-500">Or continue with</span>
+                            <span className={`px-2 transition-colors ${isDark ? 'bg-slate-900 text-slate-500' : 'bg-white text-slate-500'}`}>Or continue with</span>
                         </div>
                     </div>
 
-                    <div className="mt-6 grid grid-cols-2 gap-3">
+                    <div className="mt-4 grid grid-cols-2 gap-3">
                         <button
                             type="button"
-                            className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+                            className={`w-full inline-flex justify-center py-2.5 px-4 rounded-xl text-sm font-medium transition-all duration-200 ${
+                                isDark 
+                                    ? 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700' 
+                                    : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 shadow-sm'
+                            }`}
                         >
-                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z" />
+                            <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                             </svg>
                             <span className="ml-2">Google</span>
                         </button>
 
                         <button
                             type="button"
-                            className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+                            className={`w-full inline-flex justify-center py-2.5 px-4 rounded-xl text-sm font-medium transition-all duration-200 ${
+                                isDark 
+                                    ? 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700' 
+                                    : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 shadow-sm'
+                            }`}
                         >
-                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.313h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
+                            <svg className="w-5 h-5" fill="#0A66C2" viewBox="0 0 24 24">
+                                <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
                             </svg>
                             <span className="ml-2">LinkedIn</span>
                         </button>
                     </div>
                 </div>
 
-                <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-6">
-                    <div className="rounded-md shadow-sm space-y-4">
+                <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+                    <div className="space-y-4">
                         <div>
-                            <label htmlFor="email" className="sr-only">
+                            <label htmlFor="email" className={`block text-sm font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                                 Email address
                             </label>
                             <input
                                 id="email"
                                 type="email"
                                 {...register('email')}
-                                className="appearance-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                placeholder="Email address"
+                                className={`w-full px-4 py-3 rounded-xl border text-sm outline-none transition-all duration-200 focus:ring-2 ${
+                                    isDark 
+                                        ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500 focus:border-sky-500 focus:ring-sky-500/20' 
+                                        : 'bg-white border-slate-200 text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-sky-500/20'
+                                }`}
+                                placeholder="Enter your email"
                             />
                             {errors.email && (
-                                <p className="mt-2 text-sm text-red-600">{errors.email.message}</p>
+                                <p className="mt-1.5 text-sm text-rose-500">{errors.email.message}</p>
                             )}
                         </div>
                         <div>
-                            <label htmlFor="password" className="sr-only">
+                            <label htmlFor="password" className={`block text-sm font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                                 Password
                             </label>
                             <input
                                 id="password"
                                 type="password"
                                 {...register('password')}
-                                className="appearance-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                placeholder="Password"
+                                className={`w-full px-4 py-3 rounded-xl border text-sm outline-none transition-all duration-200 focus:ring-2 ${
+                                    isDark 
+                                        ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500 focus:border-sky-500 focus:ring-sky-500/20' 
+                                        : 'bg-white border-slate-200 text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-sky-500/20'
+                                }`}
+                                placeholder="Enter your password"
                             />
                             {errors.password && (
-                                <p className="mt-2 text-sm text-red-600">{errors.password.message}</p>
+                                <p className="mt-1.5 text-sm text-rose-500">{errors.password.message}</p>
                             )}
                         </div>
                     </div>
@@ -165,37 +184,45 @@ function LoginForm() {
                                 id="remember-me"
                                 name="remember-me"
                                 type="checkbox"
-                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                className={`h-4 w-4 rounded transition-colors focus:ring-2 focus:ring-offset-0 ${
+                                    isDark 
+                                        ? 'bg-slate-800 border-slate-600 text-sky-500 focus:ring-sky-500' 
+                                        : 'bg-white border-slate-300 text-sky-600 focus:ring-sky-500'
+                                }`}
                             />
-                            <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
+                            <label htmlFor="remember-me" className={`ml-2 block text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                                 Remember me
                             </label>
                         </div>
 
                         <div className="text-sm">
-                            <Link href="/auth/forgot-password" className="font-medium text-blue-600 hover:text-blue-500">
-                                Forgot your password?
+                            <Link href="/auth/forgot-password" className={`font-medium transition-colors ${isDark ? 'text-sky-400 hover:text-sky-300' : 'text-sky-600 hover:text-sky-500'}`}>
+                                Forgot password?
                             </Link>
                         </div>
                     </div>
 
-                    <div>
-                        <button
-                            type="submit"
-                            disabled={isLoading}
-                            className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                        >
-                            {isLoading ? (
-                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                            ) : null}
-                            {isLoading ? 'Signing in...' : 'Sign in'}
-                        </button>
-                    </div>
+                    <motion.button
+                        type="submit"
+                        disabled={isLoading}
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                        className={`w-full flex justify-center py-3.5 px-4 rounded-xl text-sm font-semibold text-white transition-all duration-200 shadow-lg ${
+                            isDark 
+                                ? 'bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sky-500/25' 
+                                : 'bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 shadow-sky-500/25'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                        {isLoading ? (
+                            <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                            </svg>
+                        ) : null}
+                        {isLoading ? 'Signing in...' : 'Sign in'}
+                    </motion.button>
                 </form>
-            </div>
+            </motion.div>
         </div>
     )
 }

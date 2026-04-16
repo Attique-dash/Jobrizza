@@ -14,15 +14,56 @@ import { AnimatePresence, motion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const NAV_LINKS = [
   { label: 'Home', href: '/' },
-  { label: 'Features', href: '/features' },
-  { label: 'Pricing', href: '/pricing' },
-  { label: 'FAQ', href: '/faq' },
+  { label: 'Features', href: '/#features' },
+  { label: 'Pricing', href: '/#pricing' },
+  { label: 'FAQ', href: '/#faq' },
   { label: 'Contact', href: '/contact' },
 ]
+
+function scrollToSection(e: React.MouseEvent<HTMLAnchorElement>, href: string) {
+  if (href.startsWith('/#')) {
+    e.preventDefault()
+    const id = href.replace('/#', '')
+    const element = document.getElementById(id)
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
+}
+
+function useActiveSection() {
+  const [activeSection, setActiveSection] = useState('')
+  
+  useEffect(() => {
+    const handleScroll = () => {
+      const sections = ['features', 'pricing', 'faq']
+      let current = ''
+      
+      for (const section of sections) {
+        const element = document.getElementById(section)
+        if (element) {
+          const rect = element.getBoundingClientRect()
+          if (rect.top <= 100) {
+            current = section
+          }
+        }
+      }
+      
+      setActiveSection(current)
+    }
+    
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    handleScroll()
+    
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+  
+  return activeSection
+}
 
 export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -31,6 +72,7 @@ export function Header() {
   const { user, logout, isAuthenticated } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
+  const activeSection = useActiveSection()
 
   const handleLogout = () => {
     logout()
@@ -45,36 +87,43 @@ export function Header() {
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3.5 sm:px-6 lg:px-8">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 flex-shrink-0">
-          <div className={`relative h-9 w-9 overflow-hidden rounded-lg p-1 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white shadow-sm border border-slate-200'}`}>
+          <div className="relative h-16 w-32 overflow-hidden">
             <Image
-              src="/images/logo.png"
+              src={isDark ? "/images/logo2.png" : "/images/logo1.png"}
               alt="Jobrizza"
-              width={36}
-              height={36}
+              width={128}
+              height={64}
               className="h-full w-full object-contain"
               priority
             />
           </div>
-          <span className={`text-xl font-bold hidden sm:block ${isDark ? 'text-white' : 'text-slate-900'}`}>
-            Jobrizza
-          </span>
         </Link>
 
         {/* Desktop Nav */}
         <nav className="hidden items-center gap-6 md:flex">
-          {NAV_LINKS.map(link => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`text-sm font-medium transition-colors ${
-                pathname === link.href
-                  ? isDark ? 'text-sky-400' : 'text-sky-600'
-                  : isDark ? 'text-slate-300 hover:text-white' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {link.label}
-            </Link>
-          ))}
+          {NAV_LINKS.map(link => {
+            const hrefId = link.href.startsWith('/#') ? link.href.replace('/#', '') : ''
+            // Home is only active when at the top (no active section) and on home page
+            const isHome = link.href === '/' && pathname === '/' && !activeSection
+            const isContact = link.href === '/contact' && pathname === '/contact'
+            const isSectionActive = hrefId && activeSection === hrefId
+            const isActive = isHome || isContact || isSectionActive
+            
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={(e) => scrollToSection(e, link.href)}
+                className={`text-sm font-medium transition-colors ${
+                  isActive
+                    ? isDark ? 'text-sky-400' : 'text-sky-600'
+                    : isDark ? 'text-slate-300 hover:text-white' : 'text-slate-900 hover:text-sky-600'
+                }`}
+              >
+                {link.label}
+              </Link>
+            )
+          })}
         </nav>
 
         {/* Right actions */}
@@ -179,20 +228,32 @@ export function Header() {
             className={`overflow-hidden border-t md:hidden ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-100 bg-white'}`}
           >
             <div className="px-4 py-4 space-y-1">
-              {NAV_LINKS.map(link => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  onClick={() => setMobileOpen(false)}
-                  className={`block rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
-                    ${pathname === link.href
-                      ? isDark ? 'bg-sky-500/10 text-sky-400' : 'bg-sky-50 text-sky-600'
-                      : isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-50'
-                    }`}
-                >
-                  {link.label}
-                </Link>
-              ))}
+              {NAV_LINKS.map(link => {
+                const hrefId = link.href.startsWith('/#') ? link.href.replace('/#', '') : ''
+                // Home is only active when at the top (no active section) and on home page
+                const isHome = link.href === '/' && pathname === '/' && !activeSection
+                const isContact = link.href === '/contact' && pathname === '/contact'
+                const isSectionActive = hrefId && activeSection === hrefId
+                const isActive = isHome || isContact || isSectionActive
+                
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    onClick={(e) => {
+                      scrollToSection(e, link.href)
+                      setMobileOpen(false)
+                    }}
+                    className={`block rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
+                      ${isActive
+                        ? isDark ? 'bg-sky-500/10 text-sky-400' : 'bg-sky-50 text-sky-600'
+                        : isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-50'
+                      }`}
+                  >
+                    {link.label}
+                  </Link>
+                )
+              })}
               <div className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                 {isAuthenticated && user ? (
                   <>
