@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDropzone } from 'react-dropzone'
 import {
@@ -96,7 +96,7 @@ function CVUploadSection({ isDark, onCVUploaded }: { isDark: boolean; onCVUpload
     setFileName(acceptedFiles[0].name)
 
     try {
-      const res = await fetch(`${API}/api/upload-cv`, { method: 'POST', body: formData })
+      const res = await fetch('/api/cv/upload', { method: 'POST', body: formData })
       if (!res.ok) throw new Error('Upload failed')
       const result = await res.json()
       if (result.success) {
@@ -405,29 +405,134 @@ function JobMatchesSection({ isDark, cvData }: { isDark: boolean; cvData: any | 
 }
 
 // ── Candidate Profile ──────────────────────────────────────────────────────
+interface ProfileData {
+  firstName: string
+  lastName: string
+  email: string
+  phone: string
+  location: string
+  bio: string
+  website: string
+  linkedin: string
+  github: string
+  jobTitle: string
+  experience: string
+  jobType: string
+  workMode: string
+  expectedSalary: string
+  availability: string
+  languages: string[]
+  skills: string[]
+}
+
 function CandidateProfileSection({ isDark }: { isDark: boolean }) {
+  const { user } = useAuth()
   const [isEditing, setIsEditing] = useState(false)
-  const [profile, setProfile] = useState({
-    firstName: 'John',
-    lastName: 'Doe',
-    email: 'john.doe@email.com',
-    phone: '+1 (555) 123-4567',
-    location: 'San Francisco, CA',
-    bio: 'Passionate software developer with 5+ years of experience in building scalable web applications.',
-    website: 'https://johndoe.dev',
-    linkedin: 'https://linkedin.com/in/johndoe',
-    github: 'https://github.com/johndoe',
-    jobTitle: 'Senior Frontend Developer',
-    experience: '5-8 years',
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [profile, setProfile] = useState<ProfileData>({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    location: '',
+    bio: '',
+    website: '',
+    linkedin: '',
+    github: '',
+    jobTitle: '',
+    experience: '0-2 years',
     jobType: 'Full-time',
-    workMode: 'Hybrid',
-    expectedSalary: '$120,000 - $150,000',
-    availability: '2 weeks notice',
-    languages: ['English', 'Spanish'],
-    skills: ['React', 'TypeScript', 'Node.js', 'Next.js', 'Tailwind CSS', 'PostgreSQL'],
+    workMode: 'Remote',
+    expectedSalary: '',
+    availability: 'Immediately',
+    languages: [],
+    skills: [],
   })
   const [newSkill, setNewSkill] = useState('')
   const [newLanguage, setNewLanguage] = useState('')
+
+  // Fetch profile data on mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const token = sessionStorage.getItem('token')
+        if (!token) {
+          setIsLoading(false)
+          return
+        }
+
+        const res = await fetch(`${API}/api/user/profile`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        
+        if (res.ok) {
+          const data = await res.json()
+          if (data.profile) {
+            setProfile({
+              firstName: data.profile.firstName || data.user?.name?.split(' ')[0] || '',
+              lastName: data.profile.lastName || data.user?.name?.split(' ').slice(1).join(' ') || '',
+              email: data.user?.email || '',
+              phone: data.profile.phone || '',
+              location: data.profile.location || '',
+              bio: data.profile.bio || '',
+              website: data.profile.website || '',
+              linkedin: data.profile.linkedin || '',
+              github: data.profile.github || '',
+              jobTitle: data.profile.jobTitle || '',
+              experience: data.profile.experience || '0-2 years',
+              jobType: data.profile.jobType || 'Full-time',
+              workMode: data.profile.workMode || 'Remote',
+              expectedSalary: data.profile.expectedSalary || '',
+              availability: data.profile.availability || 'Immediately',
+              languages: data.profile.languages || [],
+              skills: data.profile.skills || [],
+            })
+          } else if (data.user) {
+            // Use basic user data if no profile exists
+            setProfile(prev => ({
+              ...prev,
+              firstName: data.user.name?.split(' ')[0] || '',
+              lastName: data.user.name?.split(' ').slice(1).join(' ') || '',
+              email: data.user.email || '',
+            }))
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch profile:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchProfile()
+  }, [])
+
+  // Save profile data
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      const token = sessionStorage.getItem('token')
+      if (!token) return
+
+      const res = await fetch(`${API}/api/user/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(profile)
+      })
+
+      if (!res.ok) throw new Error('Failed to save profile')
+    } catch (error) {
+      console.error('Failed to save profile:', error)
+      alert('Failed to save profile. Please try again.')
+    } finally {
+      setIsSaving(false)
+      setIsEditing(false)
+    }
+  }
 
   const addSkill = () => {
     if (newSkill && !profile.skills.includes(newSkill)) {
@@ -471,15 +576,22 @@ function CandidateProfileSection({ isDark }: { isDark: boolean }) {
           </div>
         </div>
         <button
-          onClick={() => setIsEditing(e => !e)}
+          onClick={() => isEditing ? handleSave() : setIsEditing(true)}
+          disabled={isSaving}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors
             ${isEditing
               ? isDark ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
               : isDark ? 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20' : 'bg-sky-50 text-sky-600 hover:bg-sky-100'
-            }`}
+            } ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
-          {isEditing ? <CheckIcon className="h-4 w-4" /> : <PencilIcon className="h-4 w-4" />}
-          {isEditing ? 'Save Changes' : 'Edit Profile'}
+          {isSaving ? (
+            <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+          ) : isEditing ? (
+            <CheckIcon className="h-4 w-4" />
+          ) : (
+            <PencilIcon className="h-4 w-4" />
+          )}
+          {isEditing ? (isSaving ? 'Saving...' : 'Save Changes') : 'Edit Profile'}
         </button>
       </div>
 

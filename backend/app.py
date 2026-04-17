@@ -27,7 +27,12 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 app = Flask(__name__)
-CORS(app, origins='*', supports_credentials=True)
+
+# CORS configuration - restrict to specific origins in production
+CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,http://localhost:5000')
+origins_list = [origin.strip() for origin in CORS_ORIGINS.split(',') if origin.strip()]
+
+CORS(app, origins=origins_list, supports_credentials=True)
 
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
