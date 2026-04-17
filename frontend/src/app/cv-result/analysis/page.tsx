@@ -1,17 +1,18 @@
 'use client'
 
 import { useTheme } from '@/contexts/Themecontext'
+import { useCV } from '@/contexts/CVContext'
 import { motion } from 'framer-motion'
-import { useEffect, useState } from 'react'
 
 export default function AnalysisTab() {
   const { isDark } = useTheme()
-  const [cvData, setCvData] = useState<any>(null)
+  const { cvData, loading } = useCV()
 
-  useEffect(() => {
-    const d = sessionStorage.getItem('cvData')
-    if (d) setCvData(JSON.parse(d))
-  }, [])
+  if (loading) return (
+    <div className={`min-h-[40vh] flex items-center justify-center ${isDark ? 'bg-slate-950' : 'bg-white'}`}>
+      <div className="h-10 w-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
 
   if (!cvData) return <p className="text-slate-500 text-center py-20">No CV data. <a href="/" className="text-sky-400 underline">Upload a CV</a></p>
 

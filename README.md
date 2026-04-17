@@ -1,139 +1,167 @@
-# AI-Powered Recruitment Platform
+# Jobrizza - AI-Powered Recruitment Platform
 
-A modern, full-stack recruitment platform built with Next.js, React, TypeScript, and GraphQL. This monorepo contains both the frontend and backend applications.
+A modern, full-stack recruitment platform with AI-powered CV analysis, job matching, and career coaching. Built with Next.js, React, TypeScript, Flask, and MongoDB.
 
 ## 🚀 Features
 
-- **Frontend**: Next.js 14 with React, TypeScript, Tailwind CSS, and Apollo Client
-- **Backend**: Node.js with Express, Apollo Server (GraphQL), and TypeScript
-- **Authentication**: JWT-based authentication for candidates and companies
-- **Responsive Design**: Modern UI with Tailwind CSS
-- **Type Safety**: Full TypeScript implementation
-- **GraphQL API**: Efficient data fetching with Apollo
+- **AI CV Analysis** - Upload PDF/DOCX and get instant ATS scores, improvement suggestions
+- **Skill Gap Analysis** - Identify missing skills for your target role
+- **Job Matching** - AI-powered job recommendations based on your CV
+- **Learning Path** - Curated courses and resources to upskill
+- **Mock Interviews** - AI-generated interview questions with sample answers
+- **Salary Insights** - Location-based salary benchmarks
+- **Career Roadmap** - 5-year career progression planning
+- **Cover Letter Generator** - AI-tailored cover letters for specific jobs
+- **Chatbot Assistant** - AI career assistant (Claude-powered)
 
 ## 📁 Project Structure
 
 ```
-AI-Powered Recruitment Platform/
-├── frontend/                 # Next.js frontend application
+Jobrizza/
+├── frontend/                    # Next.js 14 frontend
 │   ├── src/
-│   │   ├── app/             # App Router pages
-│   │   ├── components/      # Reusable React components
-│   │   └── lib/            # Utilities and configurations
+│   │   ├── app/                # App Router pages
+│   │   │   ├── api/            # Next.js API routes (auth, chat)
+│   │   │   ├── auth/           # Login, signup pages
+│   │   │   ├── cv-result/      # CV analysis dashboard
+│   │   │   └── ...
+│   │   ├── components/         # React components
+│   │   │   ├── layout/         # Header, navbar
+│   │   │   ├── Chatbot.tsx     # AI chat widget
+│   │   │   └── ...
+│   │   ├── contexts/           # React contexts
+│   │   │   ├── Authcontext.tsx # Auth state
+│   │   │   ├── CVContext.tsx   # CV data state
+│   │   │   └── Themecontext.tsx # Theme state
+│   │   ├── lib/               # Utilities
+│   │   │   ├── api.ts         # API helper with auth
+│   │   │   └── mongodb.ts     # MongoDB connection
+│   │   └── models/            # Mongoose models
 │   ├── package.json
-│   └── README.md
-├── backend/                 # Node.js backend API
-│   ├── src/
-│   │   ├── index.ts        # Main server file
-│   │   ├── models/         # Database models
-│   │   ├── resolvers/      # GraphQL resolvers
-│   │   └── schemas/        # GraphQL schemas
-│   ├── package.json
-│   └── README.md
-└── README.md               # This file
+│   └── .env.local             # Frontend env vars
+│
+├── backend/                     # Flask Python backend
+│   ├── app.py                  # Main Flask application
+│   ├── requirements.txt        # Python dependencies
+│   ├── uploads/                # CV upload folder
+│   └── README.md               # Backend docs
+│
+├── .env.example                # Environment template
+└── README.md                   # This file
 ```
+
+## 🛠️ Tech Stack
+
+### Frontend
+- **Next.js 14** with App Router
+- **React 18** + TypeScript
+- **Tailwind CSS** + shadcn/ui
+- **NextAuth.js** for authentication
+- **Framer Motion** for animations
+
+### Backend
+- **Flask** (Python)
+- **MongoDB** (via PyMongo)
+- **Claude API** for AI features
+- **bcrypt** for password hashing
+- **PyPDF2** + **python-docx** for CV parsing
 
 ## 🛠️ Getting Started
 
 ### Prerequisites
 
 - Node.js (v18 or higher)
-- npm or yarn
-- MongoDB (local or cloud instance)
+- Python 3.9+
+- MongoDB Atlas account (or local MongoDB)
+- Anthropic API key
+
+### Environment Variables
+
+Copy `.env.example` to `.env` and fill in your values:
+
+```bash
+# MongoDB (required for both frontend and backend)
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/jobrizza
+
+# NextAuth (frontend)
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-super-secret-key
+
+# Flask Backend
+NEXT_PUBLIC_API_URL=http://localhost:5000
+JWT_SECRET=your-flask-secret-min-32-chars
+
+# AI APIs
+ANTHROPIC_API_KEY=your-anthropic-key
+
+# Optional
+RESEND_API_KEY=your-resend-key
+```
 
 ### Quick Start
 
-1. **Clone the repository**
+1. **Clone and setup**
 ```bash
-git clone <repository-url>
-cd AI-Powered\ Recruitment\ Platform
+git clone https://github.com/Attique-dash/Jobrizza.git
+cd Jobrizza
 ```
 
-2. **Install dependencies for both frontend and backend**
+2. **Start Frontend**
 ```bash
-# Install frontend dependencies
 cd frontend
 npm install
+npm run dev
+# Runs on http://localhost:3000
+```
 
-# Install backend dependencies
+3. **Start Backend**
+```bash
 cd ../backend
-npm install
+pip install -r requirements.txt
+python app.py
+# Runs on http://localhost:5000
 ```
 
-3. **Set up environment variables**
-```bash
-# Backend environment
-cd backend
-cp .env.example .env
-# Edit .env with your configuration
+4. **Open** http://localhost:3000
 
-# Frontend environment (if needed)
-cd ../frontend
-# Create .env.local if needed
-```
+## � Documentation
 
-4. **Start development servers**
+- [Backend README](./backend/README.md) - Flask API docs
+- [Environment Setup](./.env.example) - All environment variables
 
-In one terminal (backend):
-```bash
-cd backend
-npm run dev
-```
+## 🔐 Security
 
-In another terminal (frontend):
-```bash
-cd frontend
-npm run dev
-```
-
-The applications will be available at:
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:4000
-- **GraphQL Playground**: http://localhost:4000/graphql
-
-## 🔧 Development
-
-### Frontend Development
-- Built with Next.js 14 (App Router)
-- Styled with Tailwind CSS
-- State management with Apollo Client
-- Form validation with React Hook Form and Zod
-
-### Backend Development
-- Express.js with Apollo Server
-- GraphQL API
-- JWT authentication
-- MongoDB integration ready
-
-### Available Scripts
-
-**Frontend:**
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run start` - Start production server
-- `npm run lint` - Run ESLint
-
-**Backend:**
-- `npm run dev` - Start development server with hot reload
-- `npm run build` - Build TypeScript to JavaScript
-- `npm run start` - Start production server
-- `npm run lint` - Run ESLint
+- ✅ bcrypt password hashing (12 rounds)
+- ✅ JWT-based authentication
+- ✅ Protected AI endpoints
+- ✅ MongoDB persistence (not in-memory)
+- ✅ CORS configured
+- ✅ No hardcoded secrets
 
 ## 🚢 Deployment
 
-This monorepo can be deployed as separate applications:
+### Frontend (Vercel)
+```bash
+cd frontend
+vercel --prod
+```
+Set environment variables in Vercel dashboard.
 
-- **Frontend**: Deploy to Vercel, Netlify, or any static hosting
-- **Backend**: Deploy to Railway, Heroku, DigitalOcean, or any Node.js hosting
+### Backend (Railway/Render)
+```bash
+cd backend
+# Deploy via Railway CLI or GitHub integration
+```
+Required env vars: `MONGODB_URI`, `ANTHROPIC_API_KEY`, `JWT_SECRET`
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create feature branch: `git checkout -b feature/amazing-feature`
+3. Commit changes: `git commit -m 'Add amazing feature'`
+4. Push to branch: `git push origin feature/amazing-feature`
+5. Open Pull Request
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+MIT License - see LICENSE file 

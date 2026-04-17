@@ -1,7 +1,6 @@
 'use client'
 
 import { zodResolver } from '@hookform/resolvers/zod'
-import Cookies from 'js-cookie'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -9,6 +8,7 @@ import { Suspense, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { useTheme } from '@/contexts/Themecontext'
+import { useAuth } from '@/contexts/Authcontext'
 import { motion } from 'framer-motion'
 
 const loginSchema = z.object({
@@ -22,7 +22,9 @@ function LoginForm() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const { isDark } = useTheme()
+    const { login } = useAuth()
     const [isLoading, setIsLoading] = useState(false)
+    const [error, setError] = useState('')
     const userType = 'candidate'
 
     const {
@@ -35,13 +37,13 @@ function LoginForm() {
 
     const onSubmit = async (formData: LoginFormData) => {
         setIsLoading(true)
+        setError('')
         try {
-            console.log('Login data:', formData)
-            await new Promise(resolve => setTimeout(resolve, 1000))
-            Cookies.set('userType', userType, { expires: 7 })
-            router.push(`/${userType}/dashboard`)
-        } catch (error) {
-            console.error('Login failed:', error)
+            await login(formData.email, formData.password, userType)
+            const redirect = searchParams.get('redirect') || `/${userType}/dashboard`
+            router.push(redirect)
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Login failed')
         } finally {
             setIsLoading(false)
         }
@@ -137,6 +139,11 @@ function LoginForm() {
                 </div>
 
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+                    {error && (
+                        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 text-sm">
+                            {error}
+                        </div>
+                    )}
                     <div className="space-y-4">
                         <div>
                             <label htmlFor="email" className={`block text-sm font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>

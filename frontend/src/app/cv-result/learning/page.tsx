@@ -1,22 +1,17 @@
 'use client'
 
 import { useTheme } from '@/contexts/Themecontext'
+import { useCV } from '@/contexts/CVContext'
+import { fetchWithAuth } from '@/lib/api'
 import { motion } from 'framer-motion'
-import { useEffect, useState } from 'react'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+import { useState } from 'react'
 
 export default function LearningTab() {
   const { isDark } = useTheme()
-  const [cvData, setCvData] = useState<any>(null)
+  const { cvData } = useCV()
   const [learning, setLearning] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [customSkills, setCustomSkills] = useState('')
-
-  useEffect(() => {
-    const d = sessionStorage.getItem('cvData')
-    if (d) setCvData(JSON.parse(d))
-  }, [])
 
   const fetchLearning = async () => {
     if (!cvData) return
@@ -26,9 +21,8 @@ export default function LearningTab() {
       ? customSkills.split(',').map(s => s.trim()).filter(Boolean)
       : ['Docker', 'AWS', 'System Design', 'CI/CD', 'Kubernetes']
     try {
-      const res = await fetch(`${API}/api/learning-recommendations`, {
+      const res = await fetchWithAuth('/api/learning-recommendations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ missing_skills: skillsToLearn }),
       })
       const data = await res.json()

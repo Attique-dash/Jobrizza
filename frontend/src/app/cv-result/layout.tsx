@@ -2,6 +2,7 @@
 
 import { useTheme } from '@/contexts/Themecontext'
 import { Header } from '@/components/layout/navbar'
+import { CVProvider } from '@/contexts/CVContext'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -27,8 +28,9 @@ export default function CVTabLayout({ children }: { children: React.ReactNode })
   const active = lastSegment === 'cv-result' ? 'overview' : lastSegment
 
   return (
-    <div className={`min-h-screen ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
-      <Header />
+    <CVProvider>
+      <div className={`min-h-screen ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+        <Header />
 
       {/* Sub-nav */}
       <div className={`sticky top-16 z-40 border-b ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
@@ -65,5 +67,6 @@ export default function CVTabLayout({ children }: { children: React.ReactNode })
         {children}
       </main>
     </div>
+    </CVProvider>
   )
 }

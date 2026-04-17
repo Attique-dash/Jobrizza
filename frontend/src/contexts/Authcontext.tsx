@@ -50,6 +50,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [session])
 
   const login = async (email: string, password: string, userType: 'candidate' | 'company') => {
+    // First, authenticate with Flask backend to get token
+    const flaskRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, userType }),
+    })
+    
+    const flaskData = await flaskRes.json()
+    if (!flaskRes.ok) {
+      throw new Error(flaskData.error || 'Login failed')
+    }
+    
+    // Store Flask token in sessionStorage for API calls
+    if (typeof window !== 'undefined' && flaskData.token) {
+      sessionStorage.setItem('token', flaskData.token)
+    }
+    
+    // Then authenticate with NextAuth for session management
     const result = await signIn('credentials', {
       email,
       password,
@@ -63,7 +81,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const register = async (name: string, email: string, password: string, userType: 'candidate' | 'company') => {
-    const res = await fetch('/api/auth/register', {
+    // Register with Flask backend
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, email, password, userType }),
@@ -72,11 +91,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Registration failed')
 
-    // Auto login after registration
+    // Store Flask token if provided
+    if (typeof window !== 'undefined' && data.token) {
+      sessionStorage.setItem('token', data.token)
+    }
+
+    // Auto login with NextAuth after registration
     await login(email, password, userType)
   }
 
   const logout = () => {
+    // Clear Flask token from sessionStorage
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('token')
+    }
     signOut({ callbackUrl: '/' })
   }
 
@@ -87,4 +115,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-export const useAuth = () => useContext(AuthContext)
+export const useAuth = () => {
+  const context = useContext(AuthContext)
+  // Safety check: AuthContext must be inside SessionProvider
+  if (context === undefined) {
+    throw new Error('useAuth must be used within AuthProvider, and AuthProvider must be wrapped in SessionProvider')
+  }
+  return context
+}

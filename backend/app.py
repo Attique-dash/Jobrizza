@@ -1,11 +1,14 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 import os
 import re
 import json
 import uuid
-import hashlib
+import bcrypt
+from functools import wraps
 from werkzeug.utils import secure_filename
+from pymongo import MongoClient
+from datetime import datetime, timedelta
 
 try:
     import PyPDF2
@@ -35,8 +38,18 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 cv_data_store = []
 
-# In-memory user store (replace with a real database in production)
-users_store: dict[str, dict] = {}
+# MongoDB connection
+MONGODB_URI = os.environ.get('MONGODB_URI')
+if not MONGODB_URI:
+    raise ValueError('MONGODB_URI environment variable is required')
+
+mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+db = mongo_client.get_default_database()
+users_collection = db['users']
+cv_data_collection = db['cv_data']
+
+# JWT Secret for auth tokens
+JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -72,7 +85,63 @@ def allowed_file(filename):
 
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash password using bcrypt (secure)"""
+    salt = bcrypt.gensalt(rounds=12)
+    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify password against bcrypt hash"""
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+
+def generate_token(user_id: str) -> str:
+    """Generate a simple auth token"""
+    import hmac
+    timestamp = str(int(datetime.utcnow().timestamp()))
+    token_data = f"{user_id}:{timestamp}"
+    signature = hmac.new(JWT_SECRET.encode(), token_data.encode(), 'sha256').hexdigest()[:32]
+    return f"{token_data}:{signature}"
+
+
+def verify_token(token: str) -> str | None:
+    """Verify auth token and return user_id if valid"""
+    if not token or not token.startswith('token_'):
+        return None
+    # For backward compatibility with old tokens
+    if token.startswith('token_'):
+        user_id = token.replace('token_', '')
+        # Verify user exists in DB
+        user = users_collection.find_one({'id': user_id})
+        return user_id if user else None
+    return None
+
+
+def require_auth(f):
+    """Decorator to require authentication for a route"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            return jsonify({'error': 'Authentication required'}), 401
+        
+        # Extract token from "Bearer <token>" or just "<token>"
+        token = auth_header.replace('Bearer ', '').replace('token_', '')
+        user_id = verify_token(auth_header)
+        
+        if not user_id:
+            return jsonify({'error': 'Invalid or expired token'}), 401
+        
+        # Load user from DB
+        user = users_collection.find_one({'id': user_id}, {'password_hash': 0})
+        if not user:
+            return jsonify({'error': 'User not found'}), 401
+        
+        # Set current user in flask g
+        g.current_user = user
+        g.user_id = user_id
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def extract_text_from_pdf(filepath):
@@ -805,24 +874,31 @@ def auth_register():
     if not name or not email or not password:
         return jsonify({'error': 'Name, email and password are required'}), 400
 
+    if len(password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+
     if user_type not in ('candidate', 'company'):
         return jsonify({'error': 'userType must be candidate or company'}), 400
 
-    if email in users_store:
+    # Check if email already exists in MongoDB
+    if users_collection.find_one({'email': email}):
         return jsonify({'error': 'Email already registered'}), 409
 
     user_id = str(uuid.uuid4())
-    users_store[email] = {
+    now = datetime.utcnow()
+    user_doc = {
         'id': user_id,
         'name': name,
         'email': email,
         'password_hash': hash_password(password),
         'userType': user_type,
-        'createdAt': __import__('datetime').datetime.utcnow().isoformat(),
+        'createdAt': now.isoformat(),
+        'updatedAt': now.isoformat(),
     }
+    
+    users_collection.insert_one(user_doc)
 
-    user_obj = {k: v for k, v in users_store[email].items() if k != 'password_hash'}
-    # Simple token: in production use JWT
+    user_obj = {k: v for k, v in user_doc.items() if k != 'password_hash'}
     token = f"token_{user_id}"
 
     return jsonify({'success': True, 'token': token, 'user': user_obj}), 201
@@ -841,8 +917,9 @@ def auth_login():
     if not email or not password:
         return jsonify({'error': 'Email and password are required'}), 400
 
-    user = users_store.get(email)
-    if not user or user['password_hash'] != hash_password(password):
+    # Fetch user from MongoDB
+    user = users_collection.find_one({'email': email})
+    if not user or not verify_password(password, user['password_hash']):
         return jsonify({'error': 'Invalid email or password'}), 401
 
     if user['userType'] != user_type:
@@ -898,6 +975,7 @@ def upload_cv():
 
 
 @app.route('/api/skill-gap', methods=['POST'])
+@require_auth
 def skill_gap():
     data = request.get_json()
     if not data or 'cv_data' not in data:
@@ -907,6 +985,7 @@ def skill_gap():
 
 
 @app.route('/api/job-matches', methods=['POST'])
+@require_auth
 def job_matches():
     data = request.get_json()
     if not data or 'cv_data' not in data:
@@ -916,6 +995,7 @@ def job_matches():
 
 
 @app.route('/api/learning-recommendations', methods=['POST'])
+@require_auth
 def learning_recommendations():
     data = request.get_json()
     if not data:
@@ -925,6 +1005,7 @@ def learning_recommendations():
 
 
 @app.route('/api/mock-interview', methods=['POST'])
+@require_auth
 def mock_interview():
     data = request.get_json()
     if not data or 'cv_data' not in data:
@@ -934,6 +1015,7 @@ def mock_interview():
 
 
 @app.route('/api/salary-estimate', methods=['POST'])
+@require_auth
 def salary_estimate():
     data = request.get_json()
     if not data or 'cv_data' not in data:
@@ -943,6 +1025,7 @@ def salary_estimate():
 
 
 @app.route('/api/career-path', methods=['POST'])
+@require_auth
 def career_path():
     data = request.get_json()
     if not data or 'cv_data' not in data:
@@ -952,6 +1035,7 @@ def career_path():
 
 
 @app.route('/api/cover-letter', methods=['POST'])
+@require_auth
 def cover_letter():
     data = request.get_json()
     if not data or 'cv_data' not in data:
@@ -966,6 +1050,7 @@ def cover_letter():
 
 
 @app.route('/api/improve-cv', methods=['POST'])
+@require_auth
 def improve_cv():
     data = request.get_json()
     if not data or 'cv_data' not in data:

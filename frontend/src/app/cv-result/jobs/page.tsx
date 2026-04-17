@@ -1,28 +1,23 @@
 'use client'
 
 import { useTheme } from '@/contexts/Themecontext'
+import { useCV } from '@/contexts/CVContext'
+import { fetchWithAuth } from '@/lib/api'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useEffect, useState } from 'react'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+import { useState } from 'react'
 
 export default function JobsTab() {
   const { isDark } = useTheme()
-  const [cvData, setCvData] = useState<any>(null)
+  const { cvData } = useCV()
   const [jobs, setJobs] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
-
-  useEffect(() => {
-    const d = sessionStorage.getItem('cvData')
-    if (d) setCvData(JSON.parse(d))
-  }, [])
 
   const fetchJobs = async () => {
     if (!cvData) return
     setLoading(true)
     try {
-      const res = await fetch(`${API}/api/job-matches`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cv_data: cvData }) })
+      const res = await fetchWithAuth('/api/job-matches', { method: 'POST', body: JSON.stringify({ cv_data: cvData }) })
       const data = await res.json()
       if (data.success) setJobs(data.jobs)
     } finally { setLoading(false) }

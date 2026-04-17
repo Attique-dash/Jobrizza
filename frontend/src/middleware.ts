@@ -9,12 +9,12 @@ export default withAuth(
     // If trying to access protected routes without auth
     if (pathname.startsWith('/cv-result') || pathname.startsWith('/dashboard') || pathname.startsWith('/company') || pathname.startsWith('/candidate')) {
       if (!req.nextauth.token) {
-        return NextResponse.redirect(new URL('/login', req.url))
+        return NextResponse.redirect(new URL('/auth/login', req.url))
       }
     }
 
     // If authenticated user tries to access auth pages
-    if (pathname.startsWith('/login') || pathname.startsWith('/auth/signup')) {
+    if (pathname.startsWith('/auth/login') || pathname.startsWith('/auth/signup')) {
       if (req.nextauth.token) {
         return NextResponse.redirect(new URL('/', req.url))
       }
@@ -44,7 +44,7 @@ export const config = {
     '/dashboard/:path*',
     '/company/:path*',
     '/candidate/:path*',
-    '/login',
+    '/auth/login',
     '/auth/signup',
   ],
 } 

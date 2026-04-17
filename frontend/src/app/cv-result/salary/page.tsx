@@ -1,30 +1,24 @@
 'use client'
 
 import { useTheme } from '@/contexts/Themecontext'
+import { useCV } from '@/contexts/CVContext'
+import { fetchWithAuth } from '@/lib/api'
 import { motion } from 'framer-motion'
-import { useEffect, useState } from 'react'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+import { useState } from 'react'
 
 export default function SalaryTab() {
   const { isDark } = useTheme()
-  const [cvData, setCvData] = useState<any>(null)
+  const { cvData } = useCV()
   const [location, setLocation] = useState('')
   const [salary, setSalary] = useState<any>(null)
   const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    const d = sessionStorage.getItem('cvData')
-    if (d) setCvData(JSON.parse(d))
-  }, [])
 
   const fetchSalary = async () => {
     if (!cvData) return
     setLoading(true)
     try {
-      const res = await fetch(`${API}/api/salary-estimate`, {
+      const res = await fetchWithAuth('/api/salary-estimate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cv_data: cvData, location }),
       })
       const data = await res.json()

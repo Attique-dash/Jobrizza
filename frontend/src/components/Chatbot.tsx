@@ -233,7 +233,7 @@ export function Chatbot() {
                 </button>
               </div>
               <p className={`text-center text-xs mt-2 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
-                Powered by Claude AI
+                Powered by Jobrizza AI
               </p>
             </div>
           </motion.div>

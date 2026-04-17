@@ -1,28 +1,23 @@
 'use client'
 
 import { useTheme } from '@/contexts/Themecontext'
+import { useCV } from '@/contexts/CVContext'
+import { fetchWithAuth } from '@/lib/api'
 import { motion } from 'framer-motion'
-import { useEffect, useState } from 'react'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+import { useState } from 'react'
 
 export default function SkillGapTab() {
   const { isDark } = useTheme()
-  const [cvData, setCvData] = useState<any>(null)
+  const { cvData } = useCV()
   const [targetRole, setTargetRole] = useState('')
   const [skillGap, setSkillGap] = useState<any>(null)
   const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    const d = sessionStorage.getItem('cvData')
-    if (d) setCvData(JSON.parse(d))
-  }, [])
 
   const analyze = async () => {
     if (!cvData) return
     setLoading(true)
     try {
-      const res = await fetch(`${API}/api/skill-gap`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cv_data: cvData, target_role: targetRole }) })
+      const res = await fetchWithAuth('/api/skill-gap', { method: 'POST', body: JSON.stringify({ cv_data: cvData, target_role: targetRole }) })
       const data = await res.json()
       if (data.success) setSkillGap(data.skill_gap)
     } finally { setLoading(false) }
