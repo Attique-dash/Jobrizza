@@ -53,10 +53,11 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Something went wrong';
     console.error('Registration error:', error);
     return NextResponse.json(
-      { error: error.message || 'Something went wrong' },
+      { error: errorMessage },
       { status: 500 }
     );
   }

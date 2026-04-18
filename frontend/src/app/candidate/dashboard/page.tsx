@@ -200,6 +200,8 @@ function CVUploadSection({ isDark, onCVUploaded }: { isDark: boolean; onCVUpload
 function ATSScoreSection({ isDark, cvData }: { isDark: boolean; cvData: any | null }) {
   const atsScore = cvData?.ai_analysis?.ats_score?.score ?? null
   const overallScore = cvData?.analysis?.percentage ?? null
+  const [saving, setSaving] = useState(false)
+  const [saveMessage, setSaveMessage] = useState('')
 
   const categories = cvData?.analysis?.categories
     ? Object.entries(cvData.analysis.categories).map(([key, cat]: [string, any]) => ({
@@ -208,6 +210,42 @@ function ATSScoreSection({ isDark, cvData }: { isDark: boolean; cvData: any | nu
         color: 'sky',
       }))
     : []
+
+  const handleSaveVersion = async () => {
+    if (!cvData) return
+    setSaving(true)
+    setSaveMessage('')
+    try {
+      const categoryScores: Record<string, number> = {}
+      if (cvData?.analysis?.categories) {
+        Object.entries(cvData.analysis.categories).forEach(([key, cat]: [string, any]) => {
+          categoryScores[key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())] = Math.round((cat.score / cat.max) * 100)
+        })
+      }
+
+      const res = await fetch('/api/cv-versions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `CV Version ${new Date().toLocaleDateString()}`,
+          cv_data: cvData,
+          score: overallScore || 0,
+          category_scores: categoryScores,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setSaveMessage('Version saved!')
+        setTimeout(() => setSaveMessage(''), 3000)
+      } else {
+        setSaveMessage('Failed to save')
+      }
+    } catch (err) {
+      setSaveMessage('Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <motion.div
@@ -266,10 +304,31 @@ function ATSScoreSection({ isDark, cvData }: { isDark: boolean; cvData: any | nu
       )}
 
       {cvData && (
-        <a href="/cv-result/analysis" className={`mt-6 w-full py-3 rounded-xl font-medium transition-colors block text-center
-          ${isDark ? 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20' : 'bg-sky-50 text-sky-600 hover:bg-sky-100'}`}>
-          View Detailed Analysis →
-        </a>
+        <div className="mt-6 space-y-3">
+          <button
+            onClick={handleSaveVersion}
+            disabled={saving}
+            className={`w-full py-3 rounded-xl font-medium transition-colors flex items-center justify-center gap-2
+              ${isDark ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}
+              ${saving ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            {saving ? (
+              <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <CheckCircleIcon className="h-4 w-4" />
+            )}
+            {saving ? 'Saving...' : 'Save as Version'}
+          </button>
+          {saveMessage && (
+            <p className={`text-center text-sm ${saveMessage.includes('saved') ? 'text-emerald-500' : 'text-rose-500'}`}>
+              {saveMessage}
+            </p>
+          )}
+          <a href="/cv-result/analysis" className={`w-full py-3 rounded-xl font-medium transition-colors block text-center
+            ${isDark ? 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20' : 'bg-sky-50 text-sky-600 hover:bg-sky-100'}`}>
+            View Detailed Analysis →
+          </a>
+        </div>
       )}
     </motion.div>
   )

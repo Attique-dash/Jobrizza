@@ -54,10 +54,11 @@ export async function POST(request: NextRequest) {
       message: 'Cover letter saved successfully',
       coverLetter: cv.coverLetters?.[cv.coverLetters.length - 1]
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Save cover letter error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Something went wrong';
     return NextResponse.json(
-      { error: error.message || 'Something went wrong' },
+      { error: errorMessage },
       { status: 500 }
     );
   }
@@ -91,10 +92,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ 
       coverLetters: cv.coverLetters || [] 
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Get cover letters error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Something went wrong';
     return NextResponse.json(
-      { error: error.message || 'Something went wrong' },
+      { error: errorMessage },
       { status: 500 }
     );
   }

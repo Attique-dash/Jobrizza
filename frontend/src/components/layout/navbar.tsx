@@ -160,14 +160,10 @@ export function Header() {
                     <div className={`px-4 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                       <p className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{user.name}</p>
                       <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{user.email}</p>
-                      <span className={`mt-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize
-                        ${user.userType === 'company' ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}`}>
-                        {user.userType}
-                      </span>
                     </div>
                     <div className="py-1">
                       <Link
-                        href={`/${user.userType}/dashboard`}
+                        href="/candidate/dashboard"
                         onClick={() => setProfileOpen(false)}
                         className={`flex items-center gap-2 px-4 py-2.5 text-sm transition-colors
                           ${isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'}`}
@@ -257,7 +253,7 @@ export function Header() {
               <div className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                 {isAuthenticated && user ? (
                   <>
-                    <Link href={`/${user.userType}/dashboard`} onClick={() => setMobileOpen(false)}
+                    <Link href="/candidate/dashboard" onClick={() => setMobileOpen(false)}
                       className={`block rounded-xl px-3 py-2.5 text-sm font-medium mb-1 transition-colors ${isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-50'}`}>
                       Dashboard
                     </Link>

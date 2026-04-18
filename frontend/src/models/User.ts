@@ -5,7 +5,7 @@ export interface IUser extends Document {
   email: string;
   password: string;
   name: string;
-  userType: 'candidate' | 'company';
+  userType: 'candidate';
   avatar?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -33,7 +33,6 @@ const UserSchema = new Schema<IUser>(
     },
     userType: {
       type: String,
-      enum: ['candidate', 'company'],
       default: 'candidate',
     },
     avatar: {

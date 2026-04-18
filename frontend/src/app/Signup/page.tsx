@@ -16,7 +16,6 @@ function SignupForm() {
   const redirect = searchParams.get('redirect') || '/'
 
   const [formData, setFormData] = useState({ name: '', email: '', password: '', confirm: '' })
-  const [userType, setUserType] = useState<'candidate' | 'company'>('candidate')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -26,7 +25,7 @@ function SignupForm() {
     if (formData.password.length < 6) { setError('Password must be at least 6 characters'); return }
     setLoading(true); setError('')
     try {
-      await register(formData.name, formData.email, formData.password, userType)
+      await register(formData.name, formData.email, formData.password)
       router.push(redirect)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed')
@@ -62,19 +61,6 @@ function SignupForm() {
         </div>
 
         <div className={`rounded-2xl p-8 border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xl shadow-slate-200/50'}`}>
-          <div className={`flex rounded-xl p-1 mb-6 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
-            {(['candidate', 'company'] as const).map(t => (
-              <button key={t} onClick={() => setUserType(t)}
-                className={`flex-1 py-2 rounded-lg text-sm font-semibold capitalize transition-all
-                  ${userType === t
-                    ? isDark ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm'
-                    : isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}>
-                {t === 'candidate' ? '👤 Candidate' : '🏢 Company'}
-              </button>
-            ))}
-          </div>
-
           {error && (
             <div className="mb-4 rounded-xl bg-rose-500/10 border border-rose-500/20 px-4 py-3 text-sm text-rose-400">{error}</div>
           )}
@@ -104,7 +90,7 @@ function SignupForm() {
                   </svg>
                   Creating account…
                 </span>
-              ) : `Create ${userType} account →`}
+              ) : 'Create account →'}
             </button>
           </form>
 

@@ -9,7 +9,14 @@ import {
     DocumentTextIcon,
     EnvelopeIcon,
     HomeIcon,
-    UsersIcon
+    UsersIcon,
+    ClockIcon,
+    LinkIcon,
+    BellAlertIcon,
+    TrophyIcon,
+    GlobeAltIcon,
+    ChatBubbleLeftRightIcon,
+    ShareIcon,
 } from '@heroicons/react/24/outline'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -18,17 +25,16 @@ import { Fragment, useState } from 'react'
 
 const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
-    { name: 'Candidates', href: '/company/candidates', icon: UsersIcon },
-    { name: 'Upload CVs', href: '/company/upload', icon: DocumentTextIcon },
-    { name: 'Job Filters', href: '/company/filter', icon: ChartBarIcon },
-    { name: 'Emails', href: '/company/emails', icon: EnvelopeIcon },
-]
-
-const candidateNavigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
     { name: 'My Profile', href: '/candidate/profile', icon: UsersIcon },
     { name: 'Job Matches', href: '/candidate/matches', icon: ChartBarIcon },
     { name: 'Applications', href: '/candidate/applications', icon: DocumentTextIcon },
+    { name: 'CV Versions', href: '/candidate/cv-versions', icon: ClockIcon },
+    { name: 'LinkedIn Optimizer', href: '/candidate/linkedin-optimizer', icon: LinkIcon },
+    { name: 'Job Alerts', href: '/candidate/job-alerts', icon: BellAlertIcon },
+    { name: 'Interview Grader', href: '/candidate/interview-grader', icon: ChatBubbleLeftRightIcon },
+    { name: 'My Network', href: '/candidate/network', icon: ShareIcon },
+    { name: 'Achievements', href: '/candidate/gamification', icon: TrophyIcon },
+    { name: 'Portfolio', href: '/candidate/portfolio', icon: GlobeAltIcon },
     { name: 'Messages', href: '/candidate/messages', icon: EnvelopeIcon },
 ]
 
@@ -40,11 +46,9 @@ export default function DashboardLayout({
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const pathname = usePathname()
     const router = useRouter()
-    const userType = typeof window !== 'undefined' ? localStorage.getItem('userType') : 'candidate'
-    const navItems = userType === 'company' ? navigation : candidateNavigation
+    const navItems = navigation
 
     const handleLogout = () => {
-        localStorage.removeItem('userType')
         router.push('/auth/login')
     }
 
@@ -222,16 +226,14 @@ export default function DashboardLayout({
                                 <Menu.Button className="-m-1.5 flex items-center p-1.5">
                                     <span className="sr-only">Open user menu</span>
                                     <div className="h-8 w-8 rounded-full bg-gray-50 flex items-center justify-center">
-                                        <span className="text-sm font-medium text-gray-600">
-                                            {userType === 'company' ? 'C' : 'U'}
-                                        </span>
+                                        <span className="text-sm font-medium text-gray-600">U</span>
                                     </div>
                                     <span className="hidden lg:flex lg:items-center">
                                         <span
                                             className="ml-4 text-sm font-semibold leading-6 text-gray-900"
                                             aria-hidden="true"
                                         >
-                                            {userType === 'company' ? 'Company' : 'User'}
+                                            User
                                         </span>
                                     </span>
                                 </Menu.Button>

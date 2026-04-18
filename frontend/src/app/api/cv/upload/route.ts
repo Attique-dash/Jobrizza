@@ -50,9 +50,6 @@ export async function POST(req: NextRequest) {
     const backendFormData = new FormData();
     backendFormData.append('file', file);
 
-    // Get auth token from session
-    const token = (session as any).token || session.user.id;
-
     const response = await fetch(`${API_URL}/api/upload-cv`, {
       method: 'POST',
       headers: {
@@ -76,10 +73,11 @@ export async function POST(req: NextRequest) {
       data: data.data,
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('CV upload error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to upload CV';
     return NextResponse.json(
-      { error: error.message || 'Failed to upload CV' },
+      { error: errorMessage },
       { status: 500 }
     );
   }

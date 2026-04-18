@@ -52,6 +52,14 @@ mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
 db = mongo_client.get_default_database()
 users_collection = db['users']
 cv_data_collection = db['cv_data']
+cv_versions_collection = db['cv_versions']
+applications_collection = db['applications']
+linkedin_optimizations_collection = db['linkedin_optimizations']
+job_alerts_collection = db['job_alerts']
+gamification_collection = db['gamification']
+portfolios_collection = db['portfolios']
+interview_gradings_collection = db['interview_gradings']
+network_contacts_collection = db['network_contacts']
 
 # JWT Secret for auth tokens
 JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
@@ -874,16 +882,14 @@ def auth_register():
     name = data.get('name', '').strip()
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
-    user_type = data.get('userType', 'candidate')
+    # Always default to candidate - company feature removed
+    user_type = 'candidate'
 
     if not name or not email or not password:
         return jsonify({'error': 'Name, email and password are required'}), 400
 
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
-
-    if user_type not in ('candidate', 'company'):
-        return jsonify({'error': 'userType must be candidate or company'}), 400
 
     # Check if email already exists in MongoDB
     if users_collection.find_one({'email': email}):
@@ -917,7 +923,6 @@ def auth_login():
 
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
-    user_type = data.get('userType', 'candidate')
 
     if not email or not password:
         return jsonify({'error': 'Email and password are required'}), 400
@@ -926,9 +931,6 @@ def auth_login():
     user = users_collection.find_one({'email': email})
     if not user or not verify_password(password, user['password_hash']):
         return jsonify({'error': 'Invalid email or password'}), 401
-
-    if user['userType'] != user_type:
-        return jsonify({'error': f'This account is registered as {user["userType"]}, not {user_type}'}), 403
 
     user_obj = {k: v for k, v in user.items() if k != 'password_hash'}
     token = f"token_{user['id']}"
@@ -1102,6 +1104,1590 @@ Be specific, avoid buzzwords, max 60 words."""
 @app.route('/api/cv-data', methods=['GET'])
 def get_cv_data():
     return jsonify({'cv_data': cv_data_store})
+
+
+# ─── CV Version History Routes ─────────────────────────────────────────────────
+
+@app.route('/api/cv-versions', methods=['GET'])
+@require_auth
+def get_cv_versions():
+    """Get all CV versions for the authenticated user"""
+    user_id = g.user_id
+    versions = list(cv_versions_collection.find(
+        {'user_id': user_id},
+        {'_id': 0}
+    ).sort('created_at', -1))
+    return jsonify({'success': True, 'versions': versions})
+
+
+@app.route('/api/cv-versions', methods=['POST'])
+@require_auth
+def save_cv_version():
+    """Save a new CV version"""
+    data = request.get_json()
+    if not data or 'cv_data' not in data:
+        return jsonify({'error': 'No CV data provided'}), 400
+
+    user_id = g.user_id
+    version_id = str(uuid.uuid4())
+
+    version_doc = {
+        'id': version_id,
+        'user_id': user_id,
+        'name': data.get('name', f'Version {datetime.utcnow().strftime("%Y-%m-%d %H:%M")}'),
+        'cv_data': data['cv_data'],
+        'score': data.get('score', 0),
+        'category_scores': data.get('category_scores', {}),
+        'created_at': datetime.utcnow().isoformat(),
+    }
+
+    cv_versions_collection.insert_one(version_doc)
+
+    return jsonify({
+        'success': True,
+        'version': {k: v for k, v in version_doc.items() if k != '_id'}
+    }), 201
+
+
+@app.route('/api/cv-versions/<version_id>', methods=['GET'])
+@require_auth
+def get_cv_version(version_id):
+    """Get a specific CV version"""
+    user_id = g.user_id
+    version = cv_versions_collection.find_one(
+        {'id': version_id, 'user_id': user_id},
+        {'_id': 0}
+    )
+    if not version:
+        return jsonify({'error': 'Version not found'}), 404
+    return jsonify({'success': True, 'version': version})
+
+
+@app.route('/api/cv-versions/<version_id>', methods=['DELETE'])
+@require_auth
+def delete_cv_version(version_id):
+    """Delete a CV version"""
+    user_id = g.user_id
+    result = cv_versions_collection.delete_one({'id': version_id, 'user_id': user_id})
+    if result.deleted_count == 0:
+        return jsonify({'error': 'Version not found'}), 404
+    return jsonify({'success': True, 'message': 'Version deleted'})
+
+
+@app.route('/api/cv-versions/compare', methods=['POST'])
+@require_auth
+def compare_cv_versions():
+    """Compare two CV versions"""
+    data = request.get_json()
+    if not data or 'version_id_1' not in data or 'version_id_2' not in data:
+        return jsonify({'error': 'Two version IDs required'}), 400
+
+    user_id = g.user_id
+    v1 = cv_versions_collection.find_one(
+        {'id': data['version_id_1'], 'user_id': user_id},
+        {'_id': 0}
+    )
+    v2 = cv_versions_collection.find_one(
+        {'id': data['version_id_2'], 'user_id': user_id},
+        {'_id': 0}
+    )
+
+    if not v1 or not v2:
+        return jsonify({'error': 'One or both versions not found'}), 404
+
+    comparison = {
+        'version_1': v1,
+        'version_2': v2,
+        'score_diff': (v2.get('score', 0) - v1.get('score', 0)),
+        'category_diff': {}
+    }
+
+    categories = set(v1.get('category_scores', {}).keys()) | set(v2.get('category_scores', {}).keys())
+    for cat in categories:
+        s1 = v1.get('category_scores', {}).get(cat, 0)
+        s2 = v2.get('category_scores', {}).get(cat, 0)
+        comparison['category_diff'][cat] = s2 - s1
+
+    return jsonify({'success': True, 'comparison': comparison})
+
+
+# ─── Application Tracker Routes ────────────────────────────────────────────────
+
+@app.route('/api/applications', methods=['GET'])
+@require_auth
+def get_applications():
+    """Get all job applications for the authenticated user"""
+    user_id = g.user_id
+    status_filter = request.args.get('status')
+
+    query = {'user_id': user_id}
+    if status_filter:
+        query['status'] = status_filter
+
+    applications = list(applications_collection.find(query, {'_id': 0}).sort('applied_at', -1))
+    return jsonify({'success': True, 'applications': applications})
+
+
+@app.route('/api/applications', methods=['POST'])
+@require_auth
+def create_application():
+    """Create a new job application"""
+    data = request.get_json()
+    if not data or 'company' not in data or 'position' not in data:
+        return jsonify({'error': 'Company and position are required'}), 400
+
+    user_id = g.user_id
+    application_id = str(uuid.uuid4())
+
+    application_doc = {
+        'id': application_id,
+        'user_id': user_id,
+        'company': data['company'],
+        'position': data['position'],
+        'location': data.get('location', ''),
+        'salary': data.get('salary', ''),
+        'url': data.get('url', ''),
+        'status': data.get('status', 'Applied'),
+        'notes': data.get('notes', ''),
+        'applied_at': data.get('applied_at', datetime.utcnow().isoformat()),
+        'updated_at': datetime.utcnow().isoformat(),
+    }
+
+    applications_collection.insert_one(application_doc)
+
+    return jsonify({
+        'success': True,
+        'application': {k: v for k, v in application_doc.items() if k != '_id'}
+    }), 201
+
+
+@app.route('/api/applications/<application_id>', methods=['GET'])
+@require_auth
+def get_application(application_id):
+    """Get a specific application"""
+    user_id = g.user_id
+    application = applications_collection.find_one(
+        {'id': application_id, 'user_id': user_id},
+        {'_id': 0}
+    )
+    if not application:
+        return jsonify({'error': 'Application not found'}), 404
+    return jsonify({'success': True, 'application': application})
+
+
+@app.route('/api/applications/<application_id>', methods=['PUT'])
+@require_auth
+def update_application(application_id):
+    """Update a job application"""
+    data = request.get_json()
+    user_id = g.user_id
+
+    existing = applications_collection.find_one({'id': application_id, 'user_id': user_id})
+    if not existing:
+        return jsonify({'error': 'Application not found'}), 404
+
+    update_fields = {}
+    allowed_fields = ['company', 'position', 'location', 'salary', 'url', 'status', 'notes']
+    for field in allowed_fields:
+        if field in data:
+            update_fields[field] = data[field]
+
+    update_fields['updated_at'] = datetime.utcnow().isoformat()
+
+    applications_collection.update_one(
+        {'id': application_id, 'user_id': user_id},
+        {'$set': update_fields}
+    )
+
+    updated = applications_collection.find_one({'id': application_id}, {'_id': 0})
+    return jsonify({'success': True, 'application': updated})
+
+
+@app.route('/api/applications/<application_id>', methods=['DELETE'])
+@require_auth
+def delete_application(application_id):
+    """Delete a job application"""
+    user_id = g.user_id
+    result = applications_collection.delete_one({'id': application_id, 'user_id': user_id})
+    if result.deleted_count == 0:
+        return jsonify({'error': 'Application not found'}), 404
+    return jsonify({'success': True, 'message': 'Application deleted'})
+
+
+@app.route('/api/applications/<application_id>/notes', methods=['POST'])
+@require_auth
+def add_application_note(application_id):
+    """Add a note to an application"""
+    data = request.get_json()
+    if not data or 'note' not in data:
+        return jsonify({'error': 'Note content required'}), 400
+
+    user_id = g.user_id
+    note = {
+        'id': str(uuid.uuid4()),
+        'content': data['note'],
+        'created_at': datetime.utcnow().isoformat()
+    }
+
+    result = applications_collection.update_one(
+        {'id': application_id, 'user_id': user_id},
+        {'$push': {'notes_list': note}, '$set': {'updated_at': datetime.utcnow().isoformat()}}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({'error': 'Application not found'}), 404
+
+    return jsonify({'success': True, 'note': note})
+
+
+@app.route('/api/applications/stats', methods=['GET'])
+@require_auth
+def get_application_stats():
+    """Get application statistics for the user"""
+    user_id = g.user_id
+    pipeline = [
+        {'$match': {'user_id': user_id}},
+        {'$group': {'_id': '$status', 'count': {'$sum': 1}}}
+    ]
+    stats = list(applications_collection.aggregate(pipeline))
+    return jsonify({'success': True, 'stats': {s['_id']: s['count'] for s in stats}})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LINKEDIN PROFILE OPTIMIZER
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/linkedin/analyze', methods=['POST'])
+@require_auth
+def analyze_linkedin_profile():
+    """Analyze LinkedIn profile and provide AI optimization suggestions"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request data required'}), 400
+
+    profile_text = data.get('profile_text', '').strip()
+    linkedin_url = data.get('linkedin_url', '').strip()
+
+    if not profile_text and not linkedin_url:
+        return jsonify({'error': 'LinkedIn URL or profile text required'}), 400
+
+    user_id = g.user_id
+
+    # Use Claude AI to analyze and provide suggestions
+    system_prompt = """You are an expert LinkedIn profile optimizer and career coach. Analyze the provided LinkedIn profile and provide specific, actionable suggestions to improve:
+
+1. Headline - Make it more compelling and keyword-rich
+2. Summary/About - Improve storytelling and highlight achievements
+3. Experience - Optimize bullet points with metrics and action verbs
+4. Skills - Recommend relevant skills to add
+5. Overall profile strength - General tips for better visibility
+
+Respond in JSON format with this structure:
+{
+    "headline": {"current": "...", "suggested": "...", "tips": "..."},
+    "summary": {"current": "...", "suggested": "...", "tips": "..."},
+    "experience": {"tips": "...", "improvements": ["..."]},
+    "skills": {"current": [...], "suggested_additions": [...]},
+    "overall_score": 0-100,
+    "priority_actions": ["..."]
+}"""
+
+    input_text = f"LinkedIn URL: {linkedin_url}\n\nProfile Content:\n{profile_text}" if linkedin_url else profile_text
+
+    ai_response = call_claude(system_prompt, input_text, max_tokens=2000)
+
+    # Parse AI response or provide fallback
+    suggestions = {}
+    if ai_response:
+        try:
+            # Try to extract JSON from response
+            json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+            if json_match:
+                suggestions = json.loads(json_match.group())
+        except:
+            suggestions = {
+                'headline': {'current': 'N/A', 'suggested': 'N/A', 'tips': ai_response[:500] if ai_response else 'Analysis unavailable'},
+                'overall_score': 50
+            }
+    else:
+        # Fallback suggestions when AI is unavailable
+        suggestions = {
+            'headline': {
+                'current': 'Not analyzed',
+                'suggested': 'Add your key expertise and value proposition',
+                'tips': 'Use keywords relevant to your target roles. Include your specialty and what makes you unique.'
+            },
+            'summary': {
+                'current': 'Not analyzed',
+                'suggested': 'Write a compelling narrative about your professional journey',
+                'tips': 'Start with a hook. Include metrics, achievements, and a clear call-to-action.'
+            },
+            'experience': {
+                'tips': 'Use action verbs and quantify results where possible',
+                'improvements': ['Add metrics to bullet points', 'Use STAR method', 'Highlight leadership moments']
+            },
+            'skills': {
+                'current': [],
+                'suggested_additions': ['Industry-relevant technical skills', 'Soft skills with examples', 'Certifications']
+            },
+            'overall_score': 50,
+            'priority_actions': ['Complete all profile sections', 'Add a professional photo', 'Get recommendations']
+        }
+
+    # Save optimization record
+    optimization_doc = {
+        'id': str(uuid.uuid4()),
+        'user_id': user_id,
+        'linkedin_url': linkedin_url,
+        'profile_text': profile_text[:2000] if profile_text else '',
+        'suggestions': suggestions,
+        'overall_score': suggestions.get('overall_score', 0),
+        'created_at': datetime.utcnow().isoformat()
+    }
+    linkedin_optimizations_collection.insert_one(optimization_doc)
+
+    return jsonify({
+        'success': True,
+        'suggestions': suggestions,
+        'optimization_id': optimization_doc['id']
+    })
+
+
+@app.route('/api/linkedin/optimizations', methods=['GET'])
+@require_auth
+def get_linkedin_optimizations():
+    """Get user's LinkedIn optimization history"""
+    user_id = g.user_id
+    optimizations = list(linkedin_optimizations_collection.find(
+        {'user_id': user_id},
+        {'_id': 0, 'profile_text': 0}
+    ).sort('created_at', -1).limit(10))
+    return jsonify({'success': True, 'optimizations': optimizations})
+
+
+@app.route('/api/linkedin/optimizations/<optimization_id>', methods=['GET'])
+@require_auth
+def get_linkedin_optimization(optimization_id):
+    """Get a specific LinkedIn optimization"""
+    user_id = g.user_id
+    optimization = linkedin_optimizations_collection.find_one(
+        {'id': optimization_id, 'user_id': user_id},
+        {'_id': 0}
+    )
+    if not optimization:
+        return jsonify({'error': 'Optimization not found'}), 404
+    return jsonify({'success': True, 'optimization': optimization})
+
+
+@app.route('/api/linkedin/optimizations/<optimization_id>', methods=['DELETE'])
+@require_auth
+def delete_linkedin_optimization(optimization_id):
+    """Delete a LinkedIn optimization record"""
+    user_id = g.user_id
+    result = linkedin_optimizations_collection.delete_one(
+        {'id': optimization_id, 'user_id': user_id}
+    )
+    if result.deleted_count == 0:
+        return jsonify({'error': 'Optimization not found'}), 404
+    return jsonify({'success': True, 'message': 'Optimization deleted'})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DAILY JOB ALERTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_resend_client():
+    """Get Resend email client if available"""
+    try:
+        import resend
+        api_key = os.environ.get('RESEND_API_KEY')
+        if api_key:
+            resend.api_key = api_key
+            return resend
+    except ImportError:
+        pass
+    return None
+
+
+@app.route('/api/job-alerts', methods=['GET'])
+@require_auth
+def get_job_alerts():
+    """Get user's job alert preferences and history"""
+    user_id = g.user_id
+    alert = job_alerts_collection.find_one({'user_id': user_id}, {'_id': 0})
+
+    if not alert:
+        # Return default settings
+        return jsonify({
+            'success': True,
+            'alert': {
+                'enabled': False,
+                'frequency': 'daily',
+                'job_types': ['Full-time'],
+                'work_mode': 'Remote',
+                'keywords': [],
+                'min_salary': None,
+                'location': '',
+                'last_sent': None
+            }
+        })
+
+    return jsonify({'success': True, 'alert': alert})
+
+
+@app.route('/api/job-alerts', methods=['POST'])
+@require_auth
+def create_or_update_job_alert():
+    """Create or update job alert preferences"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request data required'}), 400
+
+    user_id = g.user_id
+    user = users_collection.find_one({'id': user_id})
+
+    alert_doc = {
+        'user_id': user_id,
+        'enabled': data.get('enabled', False),
+        'frequency': data.get('frequency', 'daily'),
+        'job_types': data.get('job_types', ['Full-time']),
+        'work_mode': data.get('work_mode', 'Remote'),
+        'keywords': data.get('keywords', []),
+        'min_salary': data.get('min_salary'),
+        'location': data.get('location', ''),
+        'email': user.get('email') if user else None,
+        'updated_at': datetime.utcnow().isoformat()
+    }
+
+    # Insert or update
+    existing = job_alerts_collection.find_one({'user_id': user_id})
+    if existing:
+        job_alerts_collection.update_one(
+            {'user_id': user_id},
+            {'$set': alert_doc}
+        )
+    else:
+        alert_doc['created_at'] = datetime.utcnow().isoformat()
+        alert_doc['last_sent'] = None
+        job_alerts_collection.insert_one(alert_doc)
+
+    return jsonify({'success': True, 'alert': alert_doc})
+
+
+@app.route('/api/job-alerts/test', methods=['POST'])
+@require_auth
+def send_test_job_alert():
+    """Send a test job alert email"""
+    user_id = g.user_id
+    user = users_collection.find_one({'id': user_id})
+
+    if not user or not user.get('email'):
+        return jsonify({'error': 'User email not found'}), 400
+
+    resend_client = get_resend_client()
+    if not resend_client:
+        return jsonify({'error': 'Email service not configured'}), 500
+
+    # Generate sample job matches based on user CV
+    cv_data = cv_data_collection.find_one({'user_id': user_id}, {'_id': 0})
+    skills = cv_data.get('skills', []) if cv_data else ['JavaScript', 'React', 'Python']
+
+    # Sample jobs for the test email
+    sample_jobs = [
+        {
+            'title': 'Senior Frontend Developer',
+            'company': 'TechCorp Inc.',
+            'location': 'Remote',
+            'salary': '$120,000 - $160,000',
+            'match_score': 95,
+            'skills_match': ['React', 'TypeScript', 'Next.js'],
+            'url': '#'
+        },
+        {
+            'title': 'Full Stack Engineer',
+            'company': 'StartupXYZ',
+            'location': 'New York, NY (Hybrid)',
+            'salary': '$110,000 - $150,000',
+            'match_score': 88,
+            'skills_match': ['Python', 'React', 'PostgreSQL'],
+            'url': '#'
+        },
+        {
+            'title': 'Software Engineer II',
+            'company': 'BigTech Co.',
+            'location': 'San Francisco, CA',
+            'salary': '$130,000 - $180,000',
+            'match_score': 82,
+            'skills_match': ['JavaScript', 'AWS', 'Docker'],
+            'url': '#'
+        }
+    ]
+
+    # Build email HTML
+    jobs_html = ''
+    for job in sample_jobs:
+        jobs_html += f"""
+        <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: start;">
+                <div>
+                    <h3 style="margin: 0 0 4px 0; color: #1f2937;">{job['title']}</h3>
+                    <p style="margin: 0; color: #6b7280;">{job['company']} • {job['location']}</p>
+                </div>
+                <span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 12px; font-size: 14px;">
+                    {job['match_score']}% Match
+                </span>
+            </div>
+            <p style="margin: 8px 0 0 0; color: #059669; font-size: 14px;">{job['salary']}</p>
+            <p style="margin: 4px 0 0 0; color: #6b7280; font-size: 12px;">
+                Skills: {', '.join(job['skills_match'])}
+            </p>
+        </div>
+        """
+
+    html_content = f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; padding: 20px 0; border-bottom: 2px solid #3b82f6;">
+            <h1 style="color: #1f2937; margin: 0;">Your Daily Job Alerts</h1>
+            <p style="color: #6b7280; margin: 8px 0 0 0;">Based on your CV skills: {', '.join(skills[:5])}</p>
+        </div>
+
+        <div style="padding: 20px 0;">
+            <p style="color: #374151;">Hi {user.get('name', 'there')},</p>
+            <p style="color: #374151;">We found <strong>{len(sample_jobs)} new jobs</strong> matching your profile!</p>
+
+            <div style="margin: 24px 0;">
+                {jobs_html}
+            </div>
+
+            <div style="text-align: center; margin: 32px 0;">
+                <a href="http://localhost:3000/candidate/matches"
+                   style="background: #3b82f6; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; display: inline-block;">
+                    View All Job Matches
+                </a>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; text-align: center; color: #9ca3af; font-size: 12px;">
+            <p>This is a test email from your Job Alert settings.</p>
+            <p>You're receiving this because you enabled job alerts on our platform.</p>
+        </div>
+    </div>
+    """
+
+    try:
+        params = {
+            "from": "Job Alerts <alerts@yourdomain.com>",
+            "to": [user['email']],
+            "subject": f"Test: Your Daily Job Matches - {datetime.now().strftime('%b %d, %Y')}",
+            "html": html_content
+        }
+
+        result = resend_client.Emails.send(params)
+
+        # Update last_sent timestamp
+        job_alerts_collection.update_one(
+            {'user_id': user_id},
+            {'$set': {'last_sent': datetime.utcnow().isoformat()}},
+            upsert=True
+        )
+
+        return jsonify({
+            'success': True,
+            'message': 'Test email sent successfully',
+            'email_id': result.get('id') if isinstance(result, dict) else str(result)
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to send email: {str(e)}'}), 500
+
+
+@app.route('/api/job-alerts/unsubscribe', methods=['POST'])
+@require_auth
+def unsubscribe_job_alerts():
+    """Unsubscribe from job alerts"""
+    user_id = g.user_id
+    job_alerts_collection.update_one(
+        {'user_id': user_id},
+        {'$set': {'enabled': False, 'updated_at': datetime.utcnow().isoformat()}}
+    )
+    return jsonify({'success': True, 'message': 'Unsubscribed from job alerts'})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CV SCORE GAMIFICATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Badge definitions
+BADGES = {
+    'first_upload': {'name': 'First Steps', 'description': 'Uploaded your first CV', 'icon': '📄', 'color': '#3b82f6'},
+    'score_50': {'name': 'Getting Started', 'description': 'Achieved 50+ CV score', 'icon': '🌟', 'color': '#10b981'},
+    'score_70': {'name': 'Rising Star', 'description': 'Achieved 70+ CV score', 'icon': '⭐', 'color': '#f59e0b'},
+    'score_90': {'name': 'CV Master', 'description': 'Achieved 90+ CV score', 'icon': '🏆', 'color': '#8b5cf6'},
+    'improve_10': {'name': 'Quick Learner', 'description': 'Improved CV score by 10+ points', 'icon': '📈', 'color': '#ec4899'},
+    'improve_20': {'name': 'Rapid Growth', 'description': 'Improved CV score by 20+ points', 'icon': '🚀', 'color': '#ef4444'},
+    'streak_3': {'name': 'Consistent', 'description': '3-day upload streak', 'icon': '🔥', 'color': '#f97316'},
+    'streak_7': {'name': 'On Fire', 'description': '7-day upload streak', 'icon': '🔥🔥', 'color': '#dc2626'},
+    'streak_30': {'name': 'Dedicated', 'description': '30-day upload streak', 'icon': '💎', 'color': '#6366f1'},
+    'versions_5': {'name': 'Version Control', 'description': 'Saved 5 CV versions', 'icon': '🔄', 'color': '#14b8a6'},
+    'versions_10': {'name': 'Iterative Pro', 'description': 'Saved 10 CV versions', 'icon': '🔄🔄', 'color': '#06b6d4'},
+    'analyzer': {'name': 'Analyzer', 'description': 'Viewed detailed analysis 5 times', 'icon': '🔍', 'color': '#84cc16'},
+    'job_seeker': {'name': 'Job Seeker', 'description': 'Applied to 5 jobs', 'icon': '💼', 'color': '#a855f7'},
+}
+
+
+def check_and_award_badges(user_id: str, cv_score: int = None, score_improvement: int = None):
+    """Check conditions and award badges to user"""
+    gamification = gamification_collection.find_one({'user_id': user_id})
+
+    if not gamification:
+        gamification = {
+            'user_id': user_id,
+            'badges': [],
+            'stats': {
+                'total_uploads': 0,
+                'highest_score': 0,
+                'current_streak': 0,
+                'longest_streak': 0,
+                'last_upload_date': None,
+                'total_versions': 0,
+                'analysis_views': 0,
+                'applications_count': 0
+            },
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+
+    new_badges = []
+    stats = gamification.get('stats', {})
+
+    # Check score-based badges
+    if cv_score:
+        if cv_score >= 50 and 'score_50' not in gamification.get('badges', []):
+            new_badges.append('score_50')
+        if cv_score >= 70 and 'score_70' not in gamification.get('badges', []):
+            new_badges.append('score_70')
+        if cv_score >= 90 and 'score_90' not in gamification.get('badges', []):
+            new_badges.append('score_90')
+
+        # Update highest score
+        if cv_score > stats.get('highest_score', 0):
+            stats['highest_score'] = cv_score
+
+    # Check improvement badges
+    if score_improvement:
+        if score_improvement >= 10 and 'improve_10' not in gamification.get('badges', []):
+            new_badges.append('improve_10')
+        if score_improvement >= 20 and 'improve_20' not in gamification.get('badges', []):
+            new_badges.append('improve_20')
+
+    # Add badges with timestamps
+    for badge_id in new_badges:
+        if badge_id in BADGES:
+            gamification['badges'].append({
+                'id': badge_id,
+                'awarded_at': datetime.utcnow().isoformat(),
+                **BADGES[badge_id]
+            })
+
+    # Update streak
+    today = datetime.utcnow().date()
+    last_upload = stats.get('last_upload_date')
+
+    if last_upload:
+        last_date = datetime.fromisoformat(last_upload).date()
+        diff = (today - last_date).days
+
+        if diff == 0:
+            # Same day, don't update streak
+            pass
+        elif diff == 1:
+            # Next day, increment streak
+            stats['current_streak'] = stats.get('current_streak', 0) + 1
+        else:
+            # Streak broken
+            if stats.get('current_streak', 0) > stats.get('longest_streak', 0):
+                stats['longest_streak'] = stats['current_streak']
+            stats['current_streak'] = 1
+    else:
+        stats['current_streak'] = 1
+
+    stats['last_upload_date'] = today.isoformat()
+    stats['total_uploads'] = stats.get('total_uploads', 0) + 1
+
+    # Check streak badges
+    current_streak = stats.get('current_streak', 0)
+    if current_streak >= 3 and 'streak_3' not in [b['id'] for b in gamification.get('badges', [])]:
+        gamification['badges'].append({
+            'id': 'streak_3',
+            'awarded_at': datetime.utcnow().isoformat(),
+            **BADGES['streak_3']
+        })
+    if current_streak >= 7 and 'streak_7' not in [b['id'] for b in gamification.get('badges', [])]:
+        gamification['badges'].append({
+            'id': 'streak_7',
+            'awarded_at': datetime.utcnow().isoformat(),
+            **BADGES['streak_7']
+        })
+    if current_streak >= 30 and 'streak_30' not in [b['id'] for b in gamification.get('badges', [])]:
+        gamification['badges'].append({
+            'id': 'streak_30',
+            'awarded_at': datetime.utcnow().isoformat(),
+            **BADGES['streak_30']
+        })
+
+    # Check first upload badge
+    if stats['total_uploads'] == 1 and 'first_upload' not in [b['id'] for b in gamification.get('badges', [])]:
+        gamification['badges'].append({
+            'id': 'first_upload',
+            'awarded_at': datetime.utcnow().isoformat(),
+            **BADGES['first_upload']
+        })
+
+    gamification['stats'] = stats
+    gamification['updated_at'] = datetime.utcnow().isoformat()
+
+    # Save to database
+    gamification_collection.update_one(
+        {'user_id': user_id},
+        {'$set': gamification},
+        upsert=True
+    )
+
+    return new_badges, gamification
+
+
+@app.route('/api/gamification/profile', methods=['GET'])
+@require_auth
+def get_gamification_profile():
+    """Get user's gamification profile with badges and stats"""
+    user_id = g.user_id
+    gamification = gamification_collection.find_one({'user_id': user_id}, {'_id': 0})
+
+    if not gamification:
+        # Return default profile
+        return jsonify({
+            'success': True,
+            'profile': {
+                'badges': [],
+                'stats': {
+                    'total_uploads': 0,
+                    'highest_score': 0,
+                    'current_streak': 0,
+                    'longest_streak': 0,
+                    'total_versions': 0,
+                    'analysis_views': 0,
+                    'applications_count': 0
+                },
+                'level': 1,
+                'xp': 0,
+                'next_level_xp': 100
+            }
+        })
+
+    # Calculate level based on badges and activity
+    badges_count = len(gamification.get('badges', []))
+    stats = gamification.get('stats', {})
+    xp = badges_count * 50 + stats.get('total_uploads', 0) * 10 + stats.get('highest_score', 0)
+    level = min(10, 1 + xp // 100)
+    next_level_xp = ((level) * 100) - xp
+
+    return jsonify({
+        'success': True,
+        'profile': {
+            'badges': gamification.get('badges', []),
+            'stats': stats,
+            'level': level,
+            'xp': xp,
+            'next_level_xp': next_level_xp
+        }
+    })
+
+
+@app.route('/api/gamification/track', methods=['POST'])
+@require_auth
+def track_gamification_event():
+    """Track gamification events (upload, version saved, etc.)"""
+    data = request.get_json() or {}
+    user_id = g.user_id
+
+    event_type = data.get('event_type')
+    cv_score = data.get('cv_score')
+    score_improvement = data.get('score_improvement')
+
+    new_badges, gamification = check_and_award_badges(user_id, cv_score, score_improvement)
+
+    # Handle specific events
+    stats = gamification.get('stats', {})
+
+    if event_type == 'version_saved':
+        stats['total_versions'] = stats.get('total_versions', 0) + 1
+
+        # Check version badges
+        if stats['total_versions'] >= 5:
+            if 'versions_5' not in [b['id'] for b in gamification.get('badges', [])]:
+                gamification['badges'].append({
+                    'id': 'versions_5',
+                    'awarded_at': datetime.utcnow().isoformat(),
+                    **BADGES['versions_5']
+                })
+                new_badges.append('versions_5')
+
+        if stats['total_versions'] >= 10:
+            if 'versions_10' not in [b['id'] for b in gamification.get('badges', [])]:
+                gamification['badges'].append({
+                    'id': 'versions_10',
+                    'awarded_at': datetime.utcnow().isoformat(),
+                    **BADGES['versions_10']
+                })
+                new_badges.append('versions_10')
+
+    elif event_type == 'analysis_viewed':
+        stats['analysis_views'] = stats.get('analysis_views', 0) + 1
+
+        if stats['analysis_views'] >= 5:
+            if 'analyzer' not in [b['id'] for b in gamification.get('badges', [])]:
+                gamification['badges'].append({
+                    'id': 'analyzer',
+                    'awarded_at': datetime.utcnow().isoformat(),
+                    **BADGES['analyzer']
+                })
+                new_badges.append('analyzer')
+
+    elif event_type == 'application_added':
+        stats['applications_count'] = stats.get('applications_count', 0) + 1
+
+        if stats['applications_count'] >= 5:
+            if 'job_seeker' not in [b['id'] for b in gamification.get('badges', [])]:
+                gamification['badges'].append({
+                    'id': 'job_seeker',
+                    'awarded_at': datetime.utcnow().isoformat(),
+                    **BADGES['job_seeker']
+                })
+                new_badges.append('job_seeker')
+
+    gamification['stats'] = stats
+    gamification['updated_at'] = datetime.utcnow().isoformat()
+
+    gamification_collection.update_one(
+        {'user_id': user_id},
+        {'$set': gamification},
+        upsert=True
+    )
+
+    return jsonify({
+        'success': True,
+        'new_badges': [BADGES[b] for b in new_badges if b in BADGES],
+        'stats': stats
+    })
+
+
+@app.route('/api/gamification/leaderboard', methods=['GET'])
+def get_leaderboard():
+    """Get top users by XP (public endpoint)"""
+    pipeline = [
+        {'$project': {'_id': 0, 'user_id': 1, 'badges': 1, 'stats': 1}},
+        {'$lookup': {
+            'from': 'users',
+            'localField': 'user_id',
+            'foreignField': 'id',
+            'as': 'user'
+        }},
+        {'$unwind': {'path': '$user', 'preserveNullAndEmptyArrays': True}},
+        {'$project': {
+            'name': {'$ifNull': ['$user.name', 'Anonymous']},
+            'badge_count': {'$size': {'$ifNull': ['$badges', []]}},
+            'highest_score': {'$ifNull': ['$stats.highest_score', 0]},
+            'current_streak': {'$ifNull': ['$stats.current_streak', 0]}
+        }},
+        {'$sort': {'badge_count': -1, 'highest_score': -1}},
+        {'$limit': 10}
+    ]
+
+    leaderboard = list(gamification_collection.aggregate(pipeline))
+    return jsonify({'success': True, 'leaderboard': leaderboard})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PORTFOLIO BUILDER
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/portfolio', methods=['GET'])
+@require_auth
+def get_my_portfolio():
+    """Get user's portfolio settings"""
+    user_id = g.user_id
+    user = users_collection.find_one({'id': user_id})
+
+    portfolio = portfolios_collection.find_one({'user_id': user_id}, {'_id': 0})
+
+    if not portfolio:
+        # Generate default username from name or email
+        username = ''
+        if user:
+            if user.get('name'):
+                username = user['name'].lower().replace(' ', '')
+            elif user.get('email'):
+                username = user['email'].split('@')[0]
+
+        portfolio = {
+            'user_id': user_id,
+            'username': username,
+            'is_public': False,
+            'display_name': user.get('name', '') if user else '',
+            'title': '',
+            'bio': '',
+            'theme': 'default',
+            'show_email': False,
+            'show_phone': False,
+            'custom_domain': None,
+            'sections': {
+                'cv': True,
+                'skills': True,
+                'experience': True,
+                'education': True,
+                'projects': True,
+                'certifications': False,
+                'social_links': True
+            },
+            'social_links': {
+                'linkedin': '',
+                'github': '',
+                'twitter': '',
+                'website': ''
+            },
+            'projects': [],
+            'custom_css': '',
+            'views_count': 0,
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+
+    return jsonify({'success': True, 'portfolio': portfolio})
+
+
+@app.route('/api/portfolio', methods=['POST', 'PUT'])
+@require_auth
+def update_portfolio():
+    """Update portfolio settings"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request data required'}), 400
+
+    user_id = g.user_id
+    user = users_collection.find_one({'id': user_id})
+
+    # Check username uniqueness if changing
+    if 'username' in data:
+        new_username = data['username'].lower().strip()
+        # Remove non-alphanumeric characters except hyphens and underscores
+        new_username = re.sub(r'[^a-z0-9_-]', '', new_username)
+
+        existing = portfolios_collection.find_one({
+            'username': new_username,
+            'user_id': {'$ne': user_id}
+        })
+        if existing:
+            return jsonify({'error': 'Username already taken'}), 400
+
+        data['username'] = new_username
+
+    # Build update document
+    allowed_fields = [
+        'username', 'is_public', 'display_name', 'title', 'bio', 'theme',
+        'show_email', 'show_phone', 'custom_domain', 'sections', 'social_links',
+        'projects', 'custom_css'
+    ]
+
+    update_fields = {}
+    for field in allowed_fields:
+        if field in data:
+            update_fields[field] = data[field]
+
+    update_fields['updated_at'] = datetime.utcnow().isoformat()
+
+    # Insert or update
+    existing = portfolios_collection.find_one({'user_id': user_id})
+    if existing:
+        portfolios_collection.update_one(
+            {'user_id': user_id},
+            {'$set': update_fields}
+        )
+    else:
+        update_fields['user_id'] = user_id
+        update_fields['views_count'] = 0
+        update_fields['created_at'] = datetime.utcnow().isoformat()
+        portfolios_collection.insert_one(update_fields)
+
+    updated = portfolios_collection.find_one({'user_id': user_id}, {'_id': 0})
+    return jsonify({'success': True, 'portfolio': updated})
+
+
+@app.route('/api/portfolio/username-check/<username>', methods=['GET'])
+def check_username_availability(username):
+    """Check if a portfolio username is available"""
+    username = username.lower().strip()
+    username = re.sub(r'[^a-z0-9_-]', '', username)
+
+    if len(username) < 3:
+        return jsonify({'available': False, 'error': 'Username must be at least 3 characters'})
+
+    existing = portfolios_collection.find_one({'username': username})
+    return jsonify({'available': not existing, 'username': username})
+
+
+@app.route('/p/<username>', methods=['GET'])
+def view_public_portfolio(username):
+    """View public portfolio by username (no auth required)"""
+    username = username.lower().strip()
+
+    portfolio = portfolios_collection.find_one({'username': username})
+    if not portfolio:
+        return jsonify({'error': 'Portfolio not found'}), 404
+
+    if not portfolio.get('is_public', False):
+        return jsonify({'error': 'Portfolio is private'}), 403
+
+    # Increment view count
+    portfolios_collection.update_one(
+        {'username': username},
+        {'$inc': {'views_count': 1}}
+    )
+
+    # Get user info
+    user = users_collection.find_one({'id': portfolio['user_id']})
+
+    # Get CV data if available and section enabled
+    cv_data = None
+    if portfolio.get('sections', {}).get('cv', True):
+        cv_data = cv_data_collection.find_one({'user_id': portfolio['user_id']}, {'_id': 0})
+
+    # Build response
+    public_portfolio = {
+        'username': portfolio['username'],
+        'display_name': portfolio.get('display_name', user.get('name', 'Anonymous') if user else 'Anonymous'),
+        'title': portfolio.get('title', ''),
+        'bio': portfolio.get('bio', ''),
+        'theme': portfolio.get('theme', 'default'),
+        'sections': portfolio.get('sections', {}),
+        'social_links': portfolio.get('social_links', {}),
+        'projects': portfolio.get('projects', []),
+        'cv_data': cv_data,
+        'email': user.get('email') if portfolio.get('show_email') and user else None,
+        'views_count': portfolio.get('views_count', 0) + 1,
+        'custom_css': portfolio.get('custom_css', '')
+    }
+
+    return jsonify({'success': True, 'portfolio': public_portfolio})
+
+
+@app.route('/api/portfolio/stats', methods=['GET'])
+@require_auth
+def get_portfolio_stats():
+    """Get portfolio view statistics"""
+    user_id = g.user_id
+    portfolio = portfolios_collection.find_one({'user_id': user_id}, {'_id': 0, 'views_count': 1, 'updated_at': 1})
+
+    if not portfolio:
+        return jsonify({'success': True, 'stats': {'views_count': 0, 'updated_at': None}})
+
+    return jsonify({
+        'success': True,
+        'stats': {
+            'views_count': portfolio.get('views_count', 0),
+            'updated_at': portfolio.get('updated_at')
+        }
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INTERVIEW ANSWER GRADER
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/interview/grade', methods=['POST'])
+@require_auth
+def grade_interview_answer():
+    """Grade an interview answer using AI with STAR methodology"""
+    user_id = g.user_id
+    data = request.get_json()
+
+    question = data.get('question', '').strip()
+    answer = data.get('answer', '').strip()
+    question_type = data.get('question_type', 'behavioral')  # behavioral, technical, situational
+
+    if not question or not answer:
+        return jsonify({'error': 'Question and answer are required'}), 400
+
+    # Build the grading prompt
+    system_prompt = """You are an expert interview coach with deep knowledge of the STAR method (Situation, Task, Action, Result).
+Grade interview answers and provide detailed feedback in a structured format.
+
+Scoring criteria (each out of 100):
+1. STAR Structure - How well the answer follows Situation, Task, Action, Result format
+2. Clarity - How clear and concise the answer is
+3. Relevance - How well it answers the specific question
+4. Impact - How effectively results/outcomes are communicated
+5. Overall - Overall impression of the answer
+
+Provide feedback in this exact JSON format:
+{
+    "scores": {
+        "star_structure": 85,
+        "clarity": 90,
+        "relevance": 95,
+        "impact": 80,
+        "overall": 87
+    },
+    "star_breakdown": {
+        "situation": "Brief assessment of how situation was described",
+        "task": "Assessment of task clarity",
+        "action": "Assessment of actions taken",
+        "result": "Assessment of results shared"
+    },
+    "strengths": ["Strength 1", "Strength 2"],
+    "improvements": ["Improvement 1", "Improvement 2"],
+    "better_answer_example": "A rewritten version showing best practices",
+    "summary": "One-sentence overall assessment"
+}"""
+
+    user_prompt = f"""Question Type: {question_type}
+Question: {question}
+
+Candidate's Answer:
+{answer}
+
+Please grade this interview answer using the STAR methodology."""
+
+    try:
+        ai_response = call_claude(system_prompt, user_prompt, max_tokens=2000)
+
+        # Parse AI response
+        try:
+            # Extract JSON from response
+            import json
+            start_idx = ai_response.find('{')
+            end_idx = ai_response.rfind('}') + 1
+            if start_idx >= 0 and end_idx > start_idx:
+                json_str = ai_response[start_idx:end_idx]
+                grading_result = json.loads(json_str)
+            else:
+                grading_result = json.loads(ai_response)
+        except:
+            # Fallback if JSON parsing fails
+            grading_result = {
+                "scores": {
+                    "star_structure": 70,
+                    "clarity": 75,
+                    "relevance": 80,
+                    "impact": 70,
+                    "overall": 74
+                },
+                "star_breakdown": {
+                    "situation": "Unable to analyze",
+                    "task": "Unable to analyze",
+                    "action": "Unable to analyze",
+                    "result": "Unable to analyze"
+                },
+                "strengths": ["Answer provided"],
+                "improvements": ["Consider using STAR format more explicitly"],
+                "better_answer_example": answer,
+                "summary": "Answer received but detailed analysis unavailable"
+            }
+
+        # Save grading to history
+        grading_record = {
+            'user_id': user_id,
+            'question': question,
+            'answer': answer,
+            'question_type': question_type,
+            'scores': grading_result.get('scores', {}),
+            'feedback': grading_result,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        interview_gradings_collection.insert_one(grading_record)
+
+        # Update gamification stats
+        gamification_collection.update_one(
+            {'user_id': user_id},
+            {'$inc': {'stats.interview_practice_count': 1}},
+            upsert=True
+        )
+
+        return jsonify({
+            'success': True,
+            'grading': grading_result,
+            'scores': grading_result.get('scores', {})
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to grade answer: {str(e)}'}), 500
+
+
+@app.route('/api/interview/history', methods=['GET'])
+@require_auth
+def get_interview_grading_history():
+    """Get user's interview grading history"""
+    user_id = g.user_id
+    limit = int(request.args.get('limit', 20))
+
+    gradings = list(interview_gradings_collection.find(
+        {'user_id': user_id},
+        {'_id': 0, 'answer': 0}  # Exclude the full answer text for brevity
+    ).sort('created_at', -1).limit(limit))
+
+    # Calculate averages
+    if gradings:
+        avg_overall = sum(g.get('scores', {}).get('overall', 0) for g in gradings) / len(gradings)
+    else:
+        avg_overall = 0
+
+    return jsonify({
+        'success': True,
+        'gradings': gradings,
+        'average_score': round(avg_overall, 1),
+        'total_count': interview_gradings_collection.count_documents({'user_id': user_id})
+    })
+
+
+@app.route('/api/interview/questions', methods=['GET'])
+def get_interview_questions():
+    """Get sample interview questions by category"""
+    category = request.args.get('category', 'behavioral')
+
+    questions = {
+        'behavioral': [
+            "Tell me about yourself.",
+            "What is your greatest strength?",
+            "What is your greatest weakness?",
+            "Tell me about a time you faced a conflict at work.",
+            "Describe a time you failed and what you learned.",
+            "Give me an example of when you showed leadership.",
+            "Tell me about a time you worked under pressure.",
+            "Describe a time you had to persuade someone.",
+            "Tell me about a time you went above and beyond.",
+            "Give an example of when you had to multitask."
+        ],
+        'technical': [
+            "Explain a complex technical concept to a non-technical person.",
+            "Tell me about a challenging technical problem you solved.",
+            "How do you keep your technical skills current?",
+            "Describe your approach to debugging.",
+            "Tell me about a time you optimized code or a process."
+        ],
+        'situational': [
+            "What would you do if you disagreed with your manager's decision?",
+            "How would you handle a difficult client?",
+            "What would you do if you missed a deadline?",
+            "How would you handle a team member not pulling their weight?",
+            "What would you do if you found an error in your work after submission?"
+        ],
+        'leadership': [
+            "Tell me about a time you motivated a team.",
+            "How do you handle giving difficult feedback?",
+            "Describe a time you had to make an unpopular decision.",
+            "Tell me about a time you delegated effectively.",
+            "How do you build trust within a team?"
+        ]
+    }
+
+    category_questions = questions.get(category, questions['behavioral'])
+    import random
+    sample = random.sample(category_questions, min(5, len(category_questions)))
+
+    return jsonify({
+        'success': True,
+        'category': category,
+        'questions': sample
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REFERRAL & NETWORK GRAPH
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/network/contacts', methods=['GET'])
+@require_auth
+def get_network_contacts():
+    """Get user's network contacts"""
+    user_id = g.user_id
+
+    contacts = list(network_contacts_collection.find(
+        {'user_id': user_id},
+        {'_id': 0}
+    ).sort('created_at', -1))
+
+    # Calculate network stats
+    total_contacts = len(contacts)
+    at_target_companies = sum(1 for c in contacts if c.get('at_target_company'))
+    can_refer = sum(1 for c in contacts if c.get('can_refer'))
+
+    # Group by company
+    company_groups = {}
+    for contact in contacts:
+        company = contact.get('company', 'Unknown')
+        if company not in company_groups:
+            company_groups[company] = []
+        company_groups[company].append(contact)
+
+    return jsonify({
+        'success': True,
+        'contacts': contacts,
+        'stats': {
+            'total_contacts': total_contacts,
+            'at_target_companies': at_target_companies,
+            'can_refer': can_refer
+        },
+        'companies': [
+            {'name': company, 'count': len(contacts)}
+            for company, contacts in company_groups.items()
+        ]
+    })
+
+
+@app.route('/api/network/contacts', methods=['POST'])
+@require_auth
+def add_network_contact():
+    """Add a new network contact"""
+    user_id = g.user_id
+    data = request.get_json()
+
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip()
+    company = data.get('company', '').strip()
+    job_title = data.get('job_title', '').strip()
+
+    if not name or not email:
+        return jsonify({'error': 'Name and email are required'}), 400
+
+    # Check if contact already exists
+    existing = network_contacts_collection.find_one({
+        'user_id': user_id,
+        'email': email.lower()
+    })
+
+    if existing:
+        return jsonify({'error': 'Contact with this email already exists'}), 409
+
+    contact = {
+        'id': str(uuid.uuid4()),
+        'user_id': user_id,
+        'name': name,
+        'email': email.lower(),
+        'company': company,
+        'job_title': job_title,
+        'linkedin_url': data.get('linkedin_url', ''),
+        'relationship_strength': data.get('relationship_strength', 'acquaintance'),  # close_friend, friend, acquaintance, professional
+        'at_target_company': data.get('at_target_company', False),
+        'target_company': data.get('target_company', ''),
+        'can_refer': data.get('can_refer', False),
+        'notes': data.get('notes', ''),
+        'last_contact': data.get('last_contact', ''),
+        'tags': data.get('tags', []),
+        'created_at': datetime.utcnow().isoformat()
+    }
+
+    network_contacts_collection.insert_one(contact)
+
+    # Update gamification
+    gamification_collection.update_one(
+        {'user_id': user_id},
+        {'$inc': {'stats.network_size': 1}},
+        upsert=True
+    )
+
+    return jsonify({'success': True, 'contact': contact})
+
+
+@app.route('/api/network/contacts/import', methods=['POST'])
+@require_auth
+def import_contacts():
+    """Import multiple contacts (e.g., from CSV or LinkedIn)"""
+    user_id = g.user_id
+    data = request.get_json()
+    contacts = data.get('contacts', [])
+
+    if not contacts or not isinstance(contacts, list):
+        return jsonify({'error': 'Contacts array is required'}), 400
+
+    imported = 0
+    skipped = 0
+
+    for contact_data in contacts:
+        email = contact_data.get('email', '').strip().lower()
+        if not email:
+            continue
+
+        # Skip if already exists
+        existing = network_contacts_collection.find_one({
+            'user_id': user_id,
+            'email': email
+        })
+
+        if existing:
+            skipped += 1
+            continue
+
+        contact = {
+            'id': str(uuid.uuid4()),
+            'user_id': user_id,
+            'name': contact_data.get('name', '').strip(),
+            'email': email,
+            'company': contact_data.get('company', '').strip(),
+            'job_title': contact_data.get('job_title', '').strip(),
+            'linkedin_url': contact_data.get('linkedin_url', ''),
+            'relationship_strength': 'acquaintance',
+            'at_target_company': False,
+            'can_refer': False,
+            'notes': '',
+            'tags': [],
+            'created_at': datetime.utcnow().isoformat()
+        }
+
+        network_contacts_collection.insert_one(contact)
+        imported += 1
+
+    return jsonify({
+        'success': True,
+        'imported': imported,
+        'skipped': skipped,
+        'total': imported + skipped
+    })
+
+
+@app.route('/api/network/contacts/<contact_id>', methods=['PUT'])
+@require_auth
+def update_network_contact(contact_id):
+    """Update a network contact"""
+    user_id = g.user_id
+    data = request.get_json()
+
+    contact = network_contacts_collection.find_one({
+        'id': contact_id,
+        'user_id': user_id
+    })
+
+    if not contact:
+        return jsonify({'error': 'Contact not found'}), 404
+
+    allowed_fields = [
+        'name', 'email', 'company', 'job_title', 'linkedin_url',
+        'relationship_strength', 'at_target_company', 'target_company',
+        'can_refer', 'notes', 'last_contact', 'tags'
+    ]
+
+    update_fields = {'updated_at': datetime.utcnow().isoformat()}
+    for field in allowed_fields:
+        if field in data:
+            update_fields[field] = data[field]
+
+    network_contacts_collection.update_one(
+        {'id': contact_id},
+        {'$set': update_fields}
+    )
+
+    updated = network_contacts_collection.find_one({'id': contact_id}, {'_id': 0})
+    return jsonify({'success': True, 'contact': updated})
+
+
+@app.route('/api/network/contacts/<contact_id>', methods=['DELETE'])
+@require_auth
+def delete_network_contact(contact_id):
+    """Delete a network contact"""
+    user_id = g.user_id
+
+    result = network_contacts_collection.delete_one({
+        'id': contact_id,
+        'user_id': user_id
+    })
+
+    if result.deleted_count == 0:
+        return jsonify({'error': 'Contact not found'}), 404
+
+    return jsonify({'success': True, 'message': 'Contact deleted'})
+
+
+@app.route('/api/network/target-companies', methods=['GET'])
+@require_auth
+def get_target_company_connections():
+    """Get contacts at user's target companies"""
+    user_id = g.user_id
+    target_company = request.args.get('company')
+
+    query = {
+        'user_id': user_id,
+        'at_target_company': True
+    }
+
+    if target_company:
+        query['target_company'] = target_company
+
+    contacts = list(network_contacts_collection.find(query, {'_id': 0}))
+
+    # Group by target company
+    connections = {}
+    for contact in contacts:
+        company = contact.get('target_company', 'Unknown')
+        if company not in connections:
+            connections[company] = {
+                'company': company,
+                'contacts': [],
+                'referral_potential': 0
+            }
+        connections[company]['contacts'].append(contact)
+        if contact.get('can_refer'):
+            connections[company]['referral_potential'] += 1
+
+    return jsonify({
+        'success': True,
+        'connections': list(connections.values()),
+        'total_target_contacts': len(contacts)
+    })
+
+
+@app.route('/api/network/insights', methods=['GET'])
+@require_auth
+def get_network_insights():
+    """Get AI-powered insights about network"""
+    user_id = g.user_id
+
+    contacts = list(network_contacts_collection.find({'user_id': user_id}))
+
+    if len(contacts) < 3:
+        return jsonify({
+            'success': True,
+            'insights': {
+                'summary': 'Add more contacts to get personalized insights about your network.',
+                'recommendations': [
+                    'Import your LinkedIn connections',
+                    'Add contacts at companies you want to work for',
+                    'Keep track of who can provide referrals'
+                ],
+                'network_health': 'growing'
+            }
+        })
+
+    # Calculate network health metrics
+    companies = set(c.get('company') for c in contacts if c.get('company'))
+    target_companies = set(c.get('target_company') for c in contacts if c.get('at_target_company'))
+    referral_sources = sum(1 for c in contacts if c.get('can_refer'))
+
+    # Build insight summary
+    insights = {
+        'summary': f'You have {len(contacts)} contacts across {len(companies)} companies. ',
+        'network_health': 'strong' if len(contacts) > 20 else 'growing' if len(contacts) > 5 else 'small',
+        'top_companies': [
+            {'name': company, 'count': sum(1 for c in contacts if c.get('company') == company)}
+            for company in sorted(companies, key=lambda c: sum(1 for x in contacts if x.get('company') == c), reverse=True)[:5]
+        ],
+        'referral_opportunities': referral_sources,
+        'target_company_coverage': len(target_companies),
+        'recommendations': [
+            'Reach out to contacts you haven\'t spoken to in 3+ months' if len(contacts) > 10 else 'Continue building your network',
+            f'You have {referral_sources} potential referral sources' if referral_sources > 0 else 'Identify who in your network can refer you',
+            'Update your target companies list' if len(target_companies) == 0 else f'You have connections at {len(target_companies)} target companies'
+        ]
+    }
+
+    return jsonify({'success': True, 'insights': insights})
 
 
 if __name__ == "__main__":

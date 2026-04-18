@@ -4,7 +4,7 @@ import connectDB from '@/lib/mongodb';
 import CV from '@/models/CV';
 
 // GET - Get user's CV data
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const session = await getServerSession();
     
@@ -27,10 +27,11 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({ cv });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Get CV error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Something went wrong';
     return NextResponse.json(
-      { error: error.message || 'Something went wrong' },
+      { error: errorMessage },
       { status: 500 }
     );
   }
@@ -66,10 +67,11 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ cv }, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Save CV error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Something went wrong';
     return NextResponse.json(
-      { error: error.message || 'Something went wrong' },
+      { error: errorMessage },
       { status: 500 }
     );
   }
@@ -124,10 +126,11 @@ export async function PUT(request: NextRequest) {
     }
 
     return NextResponse.json({ cv });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Update CV error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Something went wrong';
     return NextResponse.json(
-      { error: error.message || 'Something went wrong' },
+      { error: errorMessage },
       { status: 500 }
     );
   }

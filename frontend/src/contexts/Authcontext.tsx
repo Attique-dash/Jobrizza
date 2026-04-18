@@ -7,7 +7,7 @@ export interface User {
   id: string
   name: string
   email: string
-  userType: 'candidate' | 'company'
+  userType: 'candidate'
   avatar?: string
   createdAt?: string
 }
@@ -15,8 +15,8 @@ export interface User {
 interface AuthContextType {
   user: User | null
   loading: boolean
-  login: (email: string, password: string, userType: 'candidate' | 'company') => Promise<void>
-  register: (name: string, email: string, password: string, userType: 'candidate' | 'company') => Promise<void>
+  login: (email: string, password: string) => Promise<void>
+  register: (name: string, email: string, password: string) => Promise<void>
   logout: () => void
   isAuthenticated: boolean
 }
@@ -41,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         id: session.user.id,
         name: session.user.name || '',
         email: session.user.email || '',
-        userType: session.user.userType as 'candidate' | 'company',
+        userType: session.user.userType,
         avatar: session.user.avatar,
       })
     } else {
@@ -49,12 +49,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [session])
 
-  const login = async (email: string, password: string, userType: 'candidate' | 'company') => {
+  const login = async (email: string, password: string) => {
     // First, authenticate with Flask backend to get token
     const flaskRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, userType }),
+      body: JSON.stringify({ email, password }),
     })
     
     const flaskData = await flaskRes.json()
@@ -71,7 +71,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const result = await signIn('credentials', {
       email,
       password,
-      userType,
       redirect: false,
     })
 
@@ -80,12 +79,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const register = async (name: string, email: string, password: string, userType: 'candidate' | 'company') => {
+  const register = async (name: string, email: string, password: string) => {
     // Register with Flask backend
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password, userType }),
+      body: JSON.stringify({ name, email, password }),
     })
 
     const data = await res.json()
@@ -97,7 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Auto login with NextAuth after registration
-    await login(email, password, userType)
+    await login(email, password)
   }
 
   const logout = () => {

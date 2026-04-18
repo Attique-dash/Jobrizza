@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import connectDB from '@/lib/mongodb';
 import User from '@/models/User';
 
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const session = await getServerSession();
     
@@ -35,10 +35,11 @@ export async function GET(request: NextRequest) {
         createdAt: user.createdAt,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Something went wrong';
     console.error('Get user error:', error);
     return NextResponse.json(
-      { error: error.message || 'Something went wrong' },
+      { error: errorMessage },
       { status: 500 }
     );
   }
