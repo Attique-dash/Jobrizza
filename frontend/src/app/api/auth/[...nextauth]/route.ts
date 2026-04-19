@@ -1,8 +1,8 @@
 import NextAuth from 'next-auth';
 import type { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
-import connectDB from '@/lib/mongodb';
-import User from '@/models/User';
+
+const FLASK_API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -11,33 +11,35 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
-        userType: { label: 'User Type', type: 'text' },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error('Please enter email and password');
         }
 
-        await connectDB();
+        // Authenticate against Flask backend (single source of truth)
+        const res = await fetch(`${FLASK_API}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: credentials.email,
+            password: credentials.password,
+          }),
+        });
 
-        const user = await User.findOne({ email: credentials.email.toLowerCase() });
+        const data = await res.json();
 
-        if (!user) {
-          throw new Error('No user found with this email');
-        }
-
-        const isPasswordValid = await user.comparePassword(credentials.password);
-
-        if (!isPasswordValid) {
-          throw new Error('Invalid password');
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Invalid credentials');
         }
 
         return {
-          id: user._id.toString(),
-          email: user.email,
-          name: user.name,
-          userType: user.userType,
-          avatar: user.avatar,
+          id: data.user.id,
+          email: data.user.email,
+          name: data.user.name,
+          userType: data.user.userType || 'candidate',
+          avatar: data.user.avatar,
+          token: data.token,
         };
       },
     }),
@@ -49,25 +51,24 @@ export const authOptions: NextAuthOptions = {
   },
   session: {
     strategy: 'jwt',
-    maxAge: 7 * 24 * 60 * 60, // 7 days
-  },
-  jwt: {
-    maxAge: 7 * 24 * 60 * 60, // 7 days
+    maxAge: 7 * 24 * 60 * 60,
   },
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.userType = user.userType;
-        token.avatar = user.avatar;
+        token.userType = (user as any).userType;
+        token.avatar = (user as any).avatar;
+        token.flaskToken = (user as any).token;
       }
       return token;
     },
     async session({ session, token }) {
       if (token) {
-        session.user.id = token.id;
-        session.user.userType = token.userType;
-        session.user.avatar = token.avatar;
+        session.user.id = token.id as string;
+        session.user.userType = token.userType as 'candidate' | 'recruiter';
+        session.user.avatar = token.avatar as string;
+        (session as any).flaskToken = token.flaskToken;
       }
       return session;
     },

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getFlaskAuthHeader } from '@/lib/flask-auth'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
@@ -8,15 +7,15 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id) {
+  const authHeader = await getFlaskAuthHeader()
+  if (!authHeader) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
     const res = await fetch(`${API}/api/applications/${params.id}`, {
       headers: {
-        'Authorization': `Bearer ${session.user.id}`,
+        ...authHeader,
         'Content-Type': 'application/json',
       },
     })
@@ -31,8 +30,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id) {
+  const authHeader = await getFlaskAuthHeader()
+  if (!authHeader) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -41,7 +40,7 @@ export async function PUT(
     const res = await fetch(`${API}/api/applications/${params.id}`, {
       method: 'PUT',
       headers: {
-        'Authorization': `Bearer ${session.user.id}`,
+        ...authHeader,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
@@ -57,8 +56,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id) {
+  const authHeader = await getFlaskAuthHeader()
+  if (!authHeader) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -66,7 +65,7 @@ export async function DELETE(
     const res = await fetch(`${API}/api/applications/${params.id}`, {
       method: 'DELETE',
       headers: {
-        'Authorization': `Bearer ${session.user.id}`,
+        ...authHeader,
         'Content-Type': 'application/json',
       },
     })

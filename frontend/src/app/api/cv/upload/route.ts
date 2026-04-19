@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getFlaskAuthHeader } from '@/lib/flask-auth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export async function POST(req: NextRequest) {
   try {
     // Check authentication
-    const session = await getServerSession(authOptions);
+    const authHeader = await getFlaskAuthHeader();
     
-    if (!session?.user?.id) {
+    if (!authHeader) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -52,9 +51,7 @@ export async function POST(req: NextRequest) {
 
     const response = await fetch(`${API_URL}/api/upload-cv`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer token_${session.user.id}`,
-      },
+      headers: authHeader,
       body: backendFormData,
     });
 

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/app/api/auth/[...nextauth]/route'
+import { getFlaskAuthHeader } from '@/lib/flask-auth'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
+    const authHeader = await getFlaskAuthHeader()
+    if (!authHeader) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -19,9 +18,7 @@ export async function GET(req: NextRequest) {
       : `${API}/api/network/target-companies`
 
     const res = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${session.user.id}`,
-      },
+      headers: authHeader,
     })
 
     const data = await res.json()

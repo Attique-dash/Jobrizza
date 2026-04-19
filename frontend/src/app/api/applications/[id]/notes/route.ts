@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getFlaskAuthHeader } from '@/lib/flask-auth'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
@@ -8,8 +7,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id) {
+  const authHeader = await getFlaskAuthHeader()
+  if (!authHeader) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -18,7 +17,7 @@ export async function POST(
     const res = await fetch(`${API}/api/applications/${params.id}/notes`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${session.user.id}`,
+        ...authHeader,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),

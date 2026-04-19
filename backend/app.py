@@ -5,6 +5,7 @@ import re
 import json
 import uuid
 import bcrypt
+import requests
 from functools import wraps
 from werkzeug.utils import secure_filename
 from pymongo import MongoClient
@@ -20,77 +21,89 @@ try:
 except ImportError:
     docx = None
 
-try:
-    import anthropic
-    ANTHROPIC_AVAILABLE = True
-except ImportError:
-    ANTHROPIC_AVAILABLE = False
-
 app = Flask(__name__)
 
-# CORS configuration - restrict to specific origins in production
+# ── CORS ──────────────────────────────────────────────────────────────────────
 CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,http://localhost:5000')
-origins_list = [origin.strip() for origin in CORS_ORIGINS.split(',') if origin.strip()]
-
+origins_list = [o.strip() for o in CORS_ORIGINS.split(',') if o.strip()]
 CORS(app, origins=origins_list, supports_credentials=True)
 
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-cv_data_store = []
-
-# MongoDB connection
+# ── MongoDB ───────────────────────────────────────────────────────────────────
 MONGODB_URI = os.environ.get('MONGODB_URI')
 if not MONGODB_URI:
     raise ValueError('MONGODB_URI environment variable is required')
 
 mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
 db = mongo_client.get_default_database()
-users_collection = db['users']
-cv_data_collection = db['cv_data']
-cv_versions_collection = db['cv_versions']
-applications_collection = db['applications']
+
+users_collection               = db['users']
+cv_data_collection             = db['cv_data']
+cv_versions_collection         = db['cv_versions']
+applications_collection        = db['applications']
 linkedin_optimizations_collection = db['linkedin_optimizations']
-job_alerts_collection = db['job_alerts']
-gamification_collection = db['gamification']
-portfolios_collection = db['portfolios']
-interview_gradings_collection = db['interview_gradings']
-network_contacts_collection = db['network_contacts']
+job_alerts_collection          = db['job_alerts']
+gamification_collection        = db['gamification']
+portfolios_collection          = db['portfolios']
+interview_gradings_collection  = db['interview_gradings']
+network_contacts_collection    = db['network_contacts']
 
-# JWT Secret for auth tokens
-JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me-in-production-32-chars!!')
+
+# ── OpenRouter AI ─────────────────────────────────────────────────────────────
+OPENROUTER_API_KEY  = os.environ.get("OPENROUTER_API_KEY")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_MODEL    = "openai/gpt-oss-120b:free"
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-
-def get_claude_client():
-    if not ANTHROPIC_AVAILABLE:
+def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500) -> str | None:
+    """Call OpenRouter gpt-oss-120b:free. Drop-in for old call_claude()."""
+    if not OPENROUTER_API_KEY:
+        print("OPENROUTER_API_KEY not set – AI features disabled")
         return None
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return None
-    return anthropic.Anthropic(api_key=api_key)
 
-
-def call_claude(system_prompt: str, user_prompt: str, max_tokens: int = 1500) -> str | None:
-    client = get_claude_client()
-    if not client:
-        return None
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "Jobrizza",
+    }
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "max_tokens": max_tokens,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt},
+        ],
+    }
     try:
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": user_prompt}],
-            system=system_prompt,
+        resp = requests.post(
+            f"{OPENROUTER_BASE_URL}/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=60,
         )
-        return message.content[0].text
-    except Exception as e:
-        print(f"Claude API error: {e}")
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except requests.exceptions.Timeout:
+        print("OpenRouter timeout")
         return None
+    except requests.exceptions.HTTPError as e:
+        print(f"OpenRouter HTTP {e.response.status_code}: {e.response.text[:300]}")
+        return None
+    except Exception as e:
+        print(f"OpenRouter error: {e}")
+        return None
+
+
+# Backward-compat alias
+call_claude = call_ai
+cv_data_store: list = []
 
 
 def allowed_file(filename):
@@ -104,62 +117,43 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    """Verify password against bcrypt hash"""
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
 
-def generate_token(user_id: str) -> str:
-    """Generate a simple auth token"""
-    import hmac
-    timestamp = str(int(datetime.utcnow().timestamp()))
-    token_data = f"{user_id}:{timestamp}"
-    signature = hmac.new(JWT_SECRET.encode(), token_data.encode(), 'sha256').hexdigest()[:32]
-    return f"{token_data}:{signature}"
-
-
 def verify_token(token: str) -> str | None:
-    """Verify auth token and return user_id if valid"""
-    if not token or not token.startswith('token_'):
+    """Accept 'token_<uuid>' format (what Flask returns on login)."""
+    if not token:
         return None
-    # For backward compatibility with old tokens
+    # Strip "Bearer " prefix if present
+    if token.startswith('Bearer '):
+        token = token[7:]
     if token.startswith('token_'):
-        user_id = token.replace('token_', '')
-        # Verify user exists in DB
+        user_id = token[6:]  # strip "token_"
         user = users_collection.find_one({'id': user_id})
         return user_id if user else None
     return None
 
 
 def require_auth(f):
-    """Decorator to require authentication for a route"""
     @wraps(f)
-    def decorated_function(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            return jsonify({'error': 'Authentication required'}), 401
-        
-        # Extract token from "Bearer <token>" or just "<token>"
-        token = auth_header.replace('Bearer ', '').replace('token_', '')
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
         user_id = verify_token(auth_header)
-        
         if not user_id:
-            return jsonify({'error': 'Invalid or expired token'}), 401
-        
-        # Load user from DB
+            return jsonify({'error': 'Authentication required'}), 401
         user = users_collection.find_one({'id': user_id}, {'password_hash': 0})
         if not user:
             return jsonify({'error': 'User not found'}), 401
-        
-        # Set current user in flask g
         g.current_user = user
         g.user_id = user_id
         return f(*args, **kwargs)
-    return decorated_function
+    return decorated
 
 
+# ── File extraction ───────────────────────────────────────────────────────────
 def extract_text_from_pdf(filepath):
     if PyPDF2 is None:
-        return "PDF extraction not available"
+        return "PDF extraction not available – install PyPDF2"
     text = ""
     try:
         with open(filepath, 'rb') as f:
@@ -173,7 +167,7 @@ def extract_text_from_pdf(filepath):
 
 def extract_text_from_docx(filepath):
     if docx is None:
-        return "DOCX extraction not available"
+        return "DOCX extraction not available – install python-docx"
     try:
         doc = docx.Document(filepath)
         return "\n".join([p.text for p in doc.paragraphs])
@@ -181,41 +175,35 @@ def extract_text_from_docx(filepath):
         return f"Error reading DOCX: {e}"
 
 
-# ─── CV Parsing ───────────────────────────────────────────────────────────────
-
+# ── CV parsing ────────────────────────────────────────────────────────────────
 def parse_cv_data(text: str, filename: str) -> dict:
     data = {
         'filename': filename,
         'raw_text': text[:3000],
-        'email': None,
-        'phone': None,
-        'skills': [],
-        'name': None,
-        'education': [],
-        'experience': [],
+        'email': None, 'phone': None, 'skills': [],
+        'name': None, 'education': [], 'experience': [],
         'word_count': len(text.split()),
     }
 
-    email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
-    if email_match:
-        data['email'] = email_match.group(0)
+    m = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+    if m:
+        data['email'] = m.group(0)
 
-    for pattern in [r'\+?[\d\s\-\(\)]{10,20}', r'\(\d{3}\)\s*\d{3}[\s-]?\d{4}', r'\d{3}[\s-]\d{3}[\s-]\d{4}']:
+    for pattern in [r'\+?[\d\s\-\(\)]{10,20}', r'\(\d{3}\)\s*\d{3}[\s-]?\d{4}']:
         m = re.search(pattern, text)
         if m:
             data['phone'] = m.group(0).strip()
             break
 
     common_skills = [
-        'python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'go', 'rust',
-        'react', 'angular', 'vue', 'next.js', 'node.js', 'django', 'flask',
-        'fastapi', 'spring', 'express', 'sql', 'mysql', 'postgresql', 'mongodb',
-        'redis', 'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'git', 'ci/cd',
-        'agile', 'scrum', 'machine learning', 'deep learning', 'tensorflow',
-        'pytorch', 'data analysis', 'tableau', 'power bi', 'excel', 'pandas',
-        'numpy', 'scikit-learn', 'rest api', 'graphql', 'microservices',
-        'project management', 'leadership', 'communication', 'problem solving',
-        'teamwork', 'devops', 'linux', 'figma', 'photoshop',
+        'python','javascript','typescript','java','c++','c#','go','rust',
+        'react','angular','vue','next.js','node.js','django','flask','fastapi',
+        'spring','express','sql','mysql','postgresql','mongodb','redis',
+        'aws','azure','gcp','docker','kubernetes','git','ci/cd','agile','scrum',
+        'machine learning','deep learning','tensorflow','pytorch','data analysis',
+        'tableau','power bi','excel','pandas','numpy','scikit-learn','rest api',
+        'graphql','microservices','project management','leadership','communication',
+        'problem solving','teamwork','devops','linux','figma','photoshop',
     ]
     text_lower = text.lower()
     data['skills'] = [s for s in common_skills if s in text_lower]
@@ -223,45 +211,41 @@ def parse_cv_data(text: str, filename: str) -> dict:
     lines = text.split('\n')[:10]
     for line in lines:
         line = line.strip()
-        if line and 2 < len(line) < 50:
-            if not re.match(r'^[\d\W]', line) and 'email' not in line.lower():
-                if 'name' in line.lower() and ':' in line:
-                    data['name'] = line.split(':')[1].strip()
-                elif not data['name'] and line[0].isupper():
-                    data['name'] = line
-                break
+        if line and 2 < len(line) < 50 and not re.match(r'^[\d\W]', line) and 'email' not in line.lower():
+            if 'name' in line.lower() and ':' in line:
+                data['name'] = line.split(':')[1].strip()
+            elif not data['name'] and line[0].isupper():
+                data['name'] = line
+            break
 
-    edu_keywords = ['bachelor', 'master', 'phd', 'b.s.', 'm.s.', 'degree', 'university', 'college', 'school', 'b.e.', 'b.tech', 'm.tech']
-    for kw in edu_keywords:
+    edu_kw = ['bachelor','master','phd','b.s.','m.s.','degree','university','college','school','b.tech','m.tech']
+    for kw in edu_kw:
         if kw in text_lower:
             for sentence in re.split(r'[.\n]', text):
                 if kw in sentence.lower() and len(sentence.strip()) > 10:
                     data['education'].append(sentence.strip()[:150])
                     break
 
-    exp_keywords = ['experience', 'worked at', 'employed', 'position', 'role', 'company']
-    for kw in exp_keywords:
+    for kw in ['experience','worked at','employed','position','role','company']:
         if kw in text_lower:
             for sentence in re.split(r'[.\n]', text)[:20]:
                 if kw in sentence.lower() and len(sentence.strip()) > 20:
                     data['experience'].append(sentence.strip()[:150])
                     break
-
     return data
 
 
-# ─── Legacy analysis (fast, no AI) ───────────────────────────────────────────
+# ── Legacy CV quality analysis (rule-based, no AI) ───────────────────────────
 
 def analyze_cv_quality(cv_data: dict, text: str) -> dict:
     score = 0
-    mistakes = []
-    suggestions = []
+    mistakes, suggestions = [], []
     categories = {
-        'contact_info': {'score': 0, 'max': 15, 'issues': []},
-        'structure':    {'score': 0, 'max': 20, 'issues': []},
-        'content':      {'score': 0, 'max': 25, 'issues': []},
-        'skills':       {'score': 0, 'max': 20, 'issues': []},
-        'grammar_style':{'score': 0, 'max': 20, 'issues': []},
+        'contact_info':  {'score': 0, 'max': 15, 'issues': []},
+        'structure':     {'score': 0, 'max': 20, 'issues': []},
+        'content':       {'score': 0, 'max': 25, 'issues': []},
+        'skills':        {'score': 0, 'max': 20, 'issues': []},
+        'grammar_style': {'score': 0, 'max': 20, 'issues': []},
     }
 
     if cv_data.get('email'):
@@ -274,33 +258,28 @@ def analyze_cv_quality(cv_data: dict, text: str) -> dict:
         categories['contact_info']['score'] += 5
     else:
         mistakes.append('No phone number detected')
-        suggestions.append('Include your phone number for easy contact')
 
     if cv_data.get('name'):
         categories['contact_info']['score'] += 5
     else:
         mistakes.append('Name not clearly detected')
-        suggestions.append('Make sure your full name is prominently displayed at the top')
 
     text_lower = text.lower()
-
-    if any(w in text_lower for w in ['summary', 'objective', 'profile', 'about']):
+    if any(w in text_lower for w in ['summary','objective','profile','about']):
         categories['structure']['score'] += 5
     else:
         mistakes.append('No professional summary found')
-        suggestions.append('Add a 2-3 line professional summary at the beginning')
+        suggestions.append('Add a 2-3 line professional summary')
 
     if cv_data.get('education'):
         categories['structure']['score'] += 5
     else:
         mistakes.append('Education section unclear')
-        suggestions.append('Clearly list your education with degrees, institutions, and dates')
 
     if cv_data.get('experience'):
         categories['structure']['score'] += 5
     else:
         mistakes.append('Work experience section missing or unclear')
-        suggestions.append('Add detailed work experience with company names, roles, and dates')
 
     if cv_data.get('skills'):
         categories['structure']['score'] += 5
@@ -310,53 +289,35 @@ def analyze_cv_quality(cv_data: dict, text: str) -> dict:
         categories['content']['score'] += 10
     elif wc < 200:
         mistakes.append('CV content is too brief')
-        suggestions.append('Expand to at least 300-400 words for better impact')
     else:
         mistakes.append('CV is too lengthy')
-        suggestions.append('Keep CV concise (1-2 pages recommended)')
 
-    action_verbs = ['managed', 'led', 'developed', 'created', 'implemented', 'designed',
-                    'achieved', 'improved', 'increased', 'reduced', 'launched', 'built',
-                    'coordinated', 'supervised', 'trained', 'optimized', 'delivered']
+    action_verbs = ['managed','led','developed','created','implemented','designed',
+                    'achieved','improved','increased','reduced','launched','built']
     if sum(1 for v in action_verbs if v in text_lower) >= 3:
         categories['content']['score'] += 10
     else:
-        mistakes.append('Not enough strong action verbs')
-        suggestions.append('Use strong action verbs: managed, developed, achieved, etc.')
+        suggestions.append('Use strong action verbs')
 
-    if re.search(r'\d+%|\$\d+|\d+\s*(years?|months?|people|team)', text_lower):
+    if re.search(r'\d+%|\$\d+|\d+\s*(years?|months?|people)', text_lower):
         categories['content']['score'] += 5
     else:
-        mistakes.append('Missing quantifiable achievements')
         suggestions.append('Add numbers to achievements (e.g., "Increased sales by 25%")')
 
     sc = len(cv_data.get('skills', []))
-    if sc >= 8:
-        categories['skills']['score'] += 15
-    elif sc >= 5:
-        categories['skills']['score'] += 10
-    elif sc >= 3:
+    if sc >= 8:   categories['skills']['score'] += 15
+    elif sc >= 5: categories['skills']['score'] += 10
+    elif sc >= 3: categories['skills']['score'] += 5
+    else:         suggestions.append('Add more relevant skills')
+
+    if sum(1 for s in ['communication','leadership','teamwork','problem solving'] if s in text_lower) >= 2:
         categories['skills']['score'] += 5
-    else:
-        mistakes.append('Limited skills showcased')
-        suggestions.append('Add more relevant skills (technical and soft skills)')
 
-    soft = ['communication', 'leadership', 'teamwork', 'problem solving']
-    if sum(1 for s in soft if s in text_lower) >= 2:
-        categories['skills']['score'] += 5
-    else:
-        suggestions.append('Include relevant soft skills like communication and leadership')
-
-    grammar_issues = 0
-    for pattern in [r'\b(\w+) \1\b', r'  +', r'[A-Z]{5,}']:
-        if re.search(pattern, text):
-            grammar_issues += 1
-
+    grammar_issues = sum(1 for p in [r'\b(\w+) \1\b', r'  +', r'[A-Z]{5,}'] if re.search(p, text))
     if grammar_issues == 0:
         categories['grammar_style']['score'] += 10
     else:
         mistakes.append('Potential grammar or formatting issues detected')
-        suggestions.append('Review for proper grammar and professional tone')
 
     if text.count('•') + text.count('-') + text.count('*') >= 5:
         categories['grammar_style']['score'] += 10
@@ -366,26 +327,17 @@ def analyze_cv_quality(cv_data: dict, text: str) -> dict:
     total = sum(c['score'] for c in categories.values())
     pct = round((total / 100) * 100)
 
-    if pct >= 85:
-        status, msg = 'Excellent', 'Your CV is professional and well-structured!'
-    elif pct >= 70:
-        status, msg = 'Good', 'Good CV with minor improvements needed'
-    elif pct >= 50:
-        status, msg = 'Average', 'Your CV needs some improvements to stand out'
-    else:
-        status, msg = 'Needs Work', 'Significant improvements recommended'
+    if pct >= 85:   status, msg = 'Excellent', 'Your CV is professional and well-structured!'
+    elif pct >= 70: status, msg = 'Good',      'Good CV with minor improvements needed'
+    elif pct >= 50: status, msg = 'Average',   'Your CV needs some improvements'
+    else:           status, msg = 'Needs Work', 'Significant improvements recommended'
 
     return {
-        'score': total,
-        'max_score': 100,
-        'percentage': pct,
-        'status': status,
-        'status_message': msg,
-        'categories': categories,
+        'score': total, 'max_score': 100, 'percentage': pct,
+        'status': status, 'status_message': msg, 'categories': categories,
         'mistakes': mistakes or ['No major issues found'],
         'suggestions': suggestions or ['Great job! Your CV looks professional'],
-        'word_count': wc,
-        'skills_count': sc,
+        'word_count': wc, 'skills_count': sc,
     }
 
 
