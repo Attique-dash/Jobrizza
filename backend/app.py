@@ -1,6 +1,10 @@
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 import re
 import json
 import uuid
@@ -861,7 +865,7 @@ def auth_register():
     
     users_collection.insert_one(user_doc)
 
-    user_obj = {k: v for k, v in user_doc.items() if k != 'password_hash'}
+    user_obj = {k: v for k, v in user_doc.items() if k not in ('password_hash', '_id')}
     token = f"token_{user_id}"
 
     return jsonify({'success': True, 'token': token, 'user': user_obj}), 201
@@ -884,10 +888,20 @@ def auth_login():
     if not user or not verify_password(password, user['password_hash']):
         return jsonify({'error': 'Invalid email or password'}), 401
 
-    user_obj = {k: v for k, v in user.items() if k != 'password_hash'}
+    user_obj = {k: v for k, v in user.items() if k not in ('password_hash', '_id')}
     token = f"token_{user['id']}"
 
     return jsonify({'success': True, 'token': token, 'user': user_obj})
+
+
+@app.route('/api/user/profile', methods=['GET'])
+@require_auth
+def get_user_profile():
+    """Get current user's profile"""
+    user = users_collection.find_one({'id': g.user_id}, {'password_hash': 0, '_id': 0})
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({'success': True, 'user': user})
 
 
 # ─── CV Routes ────────────────────────────────────────────────────────────────
