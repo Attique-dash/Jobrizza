@@ -22,6 +22,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { Fragment, useState } from 'react'
+import { useTheme } from '@/contexts/Themecontext'
 
 const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
@@ -46,6 +47,7 @@ export default function DashboardLayout({
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const pathname = usePathname()
     const router = useRouter()
+    const { isDark } = useTheme()
     const navItems = navigation
 
     const handleLogout = () => {
@@ -83,10 +85,10 @@ export default function DashboardLayout({
                                     <div className="flex h-16 shrink-0 items-center">
                                         <Image
                                             className="h-8 w-auto"
-                                            src="/logo.png"
-                                            alt="AI Recruitment Platform"
-                                            width={32}
-                                            height={32}
+                                            src={isDark ? '/images/logo2.png' : '/images/logo1.png'}
+                                            alt="Jobrizza"
+                                            width={96}
+                                            height={48}
                                         />
                                     </div>
                                     <nav className="flex flex-1 flex-col">
@@ -143,10 +145,10 @@ export default function DashboardLayout({
                     <div className="flex h-16 shrink-0 items-center">
                         <Image
                             className="h-8 w-auto"
-                            src="/logo.png"
-                            alt="AI Recruitment Platform"
-                            width={32}
-                            height={32}
+                            src={isDark ? '/images/logo2.png' : '/images/logo1.png'}
+                            alt="Jobrizza"
+                            width={96}
+                            height={48}
                         />
                     </div>
                     <nav className="flex flex-1 flex-col">

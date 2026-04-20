@@ -378,7 +378,7 @@ Return this exact JSON structure:
   }}
 }}"""
 
-    result = call_claude(
+    result = call_ai(
         "You are an expert CV analyst. Return ONLY valid JSON with no markdown or commentary.",
         prompt,
         2000
@@ -443,7 +443,7 @@ Return ONLY this JSON:
   "quick_wins": ["skills that could be learned in under 2 weeks"]
 }}"""
 
-    result = call_claude("You are a career advisor. Return ONLY valid JSON.", prompt, 1200)
+    result = call_ai("You are a career advisor. Return ONLY valid JSON.", prompt, 1200)
     if result:
         try:
             clean = result.strip()
@@ -498,7 +498,7 @@ Return ONLY this JSON array:
 
 Generate 6 jobs with realistic companies and varying match scores (55-96%)."""
 
-    result = call_claude("You are a job matching AI. Return ONLY a valid JSON array.", prompt, 1500)
+    result = call_ai("You are a job matching AI. Return ONLY a valid JSON array.", prompt, 1500)
     if result:
         try:
             clean = result.strip()
@@ -573,7 +573,7 @@ Return ONLY this JSON:
 
 Generate 4-5 skill recommendations with 2 resources each."""
 
-    result = call_claude("You are a learning advisor. Return ONLY valid JSON.", prompt, 1500)
+    result = call_ai("You are a learning advisor. Return ONLY valid JSON.", prompt, 1500)
     if result:
         try:
             clean = result.strip()
@@ -624,7 +624,7 @@ Return ONLY this JSON:
 
 Generate 6 questions: 2 behavioral, 3 technical, 1 situational."""
 
-    result = call_claude("You are an interview coach. Return ONLY valid JSON.", prompt, 1500)
+    result = call_ai("You are an interview coach. Return ONLY valid JSON.", prompt, 1500)
     if result:
         try:
             clean = result.strip()
@@ -689,7 +689,7 @@ Return ONLY this JSON:
   "negotiation_tips": ["tip 1", "tip 2", "tip 3"]
 }}"""
 
-    result = call_claude("You are a compensation analyst. Return ONLY valid JSON.", prompt, 1200)
+    result = call_ai("You are a compensation analyst. Return ONLY valid JSON.", prompt, 1200)
     if result:
         try:
             clean = result.strip()
@@ -747,7 +747,7 @@ Return ONLY this JSON:
 
 Generate 5 milestones (one per year)."""
 
-    result = call_claude("You are a career coach. Return ONLY valid JSON.", prompt, 1500)
+    result = call_ai("You are a career coach. Return ONLY valid JSON.", prompt, 1500)
     if result:
         try:
             clean = result.strip()
@@ -799,7 +799,7 @@ Return ONLY this JSON:
 
 Write a genuine, specific letter. Avoid clichés like 'I am writing to express my interest'."""
 
-    result = call_claude("You are a professional cover letter writer. Return ONLY valid JSON.", prompt, 1000)
+    result = call_ai("You are a professional cover letter writer. Return ONLY valid JSON.", prompt, 1000)
     if result:
         try:
             clean = result.strip()
@@ -904,6 +904,21 @@ def get_user_profile():
     return jsonify({'success': True, 'user': user})
 
 
+@app.route('/api/user/profile', methods=['PUT'])
+@require_auth
+def update_user_profile():
+    """Update current user's profile"""
+    data = request.get_json()
+    user_id = g.user_id
+    allowed = ['firstName','lastName','phone','location','bio','website',
+               'linkedin','github','jobTitle','experience','jobType',
+               'workMode','expectedSalary','availability','languages','skills']
+    update_fields = {k: v for k, v in data.items() if k in allowed}
+    update_fields['updatedAt'] = datetime.utcnow().isoformat()
+    users_collection.update_one({'id': user_id}, {'$set': update_fields})
+    return jsonify({'success': True})
+
+
 # ─── CV Routes ────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -912,6 +927,7 @@ def home():
 
 
 @app.route('/api/upload-cv', methods=['POST'])
+@require_auth
 def upload_cv():
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
@@ -942,7 +958,16 @@ def upload_cv():
         'analysis': analysis,
         'ai_analysis': ai_analysis,
     }
+
+    # Persist to MongoDB
+    if hasattr(g, 'user_id'):
+        cv_doc = {'user_id': g.user_id, 'created_at': datetime.utcnow().isoformat(), **cv_data_with_analysis}
+        cv_data_collection.replace_one({'user_id': g.user_id}, cv_doc, upsert=True)
+
     cv_data_store.append(cv_data_with_analysis)
+
+    # Track gamification for CV upload
+    check_and_award_badges(g.user_id, cv_score=analysis.get('percentage'))
 
     return jsonify({'success': True, 'message': 'CV processed', 'data': cv_data_with_analysis})
 
@@ -1038,7 +1063,7 @@ def improve_cv():
 Skills: {', '.join(skills_base[:6])}
 Be specific, avoid buzzwords, max 60 words."""
 
-    summary = call_claude(
+    summary = call_ai(
         "You are a CV writer. Write only the summary text, no labels or JSON.",
         prompt, 200
     )
@@ -1360,7 +1385,10 @@ Respond in JSON format with this structure:
 
     input_text = f"LinkedIn URL: {linkedin_url}\n\nProfile Content:\n{profile_text}" if linkedin_url else profile_text
 
-    ai_response = call_claude(system_prompt, input_text, max_tokens=2000)
+    if not linkedin_url and not profile_text:
+        return jsonify({'error': 'LinkedIn URL or profile text required'}), 400
+
+    ai_response = call_ai(system_prompt, input_text, max_tokens=2000)
 
     # Parse AI response or provide fallback
     suggestions = {}
@@ -1370,7 +1398,8 @@ Respond in JSON format with this structure:
             json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
             if json_match:
                 suggestions = json.loads(json_match.group())
-        except:
+        except Exception as e:
+            print(f"Failed to parse AI JSON response: {e}")
             suggestions = {
                 'headline': {'current': 'N/A', 'suggested': 'N/A', 'tips': ai_response[:500] if ai_response else 'Analysis unavailable'},
                 'overall_score': 50
@@ -2224,7 +2253,7 @@ Candidate's Answer:
 Please grade this interview answer using the STAR methodology."""
 
     try:
-        ai_response = call_claude(system_prompt, user_prompt, max_tokens=2000)
+        ai_response = call_ai(system_prompt, user_prompt, max_tokens=2000)
 
         # Parse AI response
         try:

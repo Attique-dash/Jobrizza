@@ -22,10 +22,10 @@ export default function CVTabLayout({ children }: { children: React.ReactNode })
   const { isDark } = useTheme()
   const pathname = usePathname()
 
-  // Determine active tab: /cv-result → overview, /cv-result/analysis → analysis, etc.
+  // Determine active tab: /cv-result or /cv-result/overview → overview, /cv-result/analysis → analysis, etc.
   const segments = pathname.split('/')
   const lastSegment = segments[segments.length - 1]
-  const active = lastSegment === 'cv-result' ? 'overview' : lastSegment
+  const active = lastSegment === 'cv-result' || lastSegment === 'overview' ? 'overview' : lastSegment
 
   return (
     <CVProvider>
@@ -47,7 +47,7 @@ export default function CVTabLayout({ children }: { children: React.ReactNode })
             {TABS.map(tab => (
               <Link
                 key={tab.id}
-                href={tab.id === 'overview' ? '/cv-result' : `/cv-result/${tab.id}`}
+                href={`/cv-result/${tab.id}`}
                 className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all
                   ${active === tab.id
                     ? isDark ? 'bg-sky-500/20 text-sky-400' : 'bg-sky-50 text-sky-700'

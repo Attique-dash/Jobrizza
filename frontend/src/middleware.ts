@@ -13,13 +13,6 @@ export default withAuth(
       }
     }
 
-    // If authenticated user tries to access auth pages
-    if (pathname.startsWith('/auth/login') || pathname.startsWith('/auth/signup')) {
-      if (req.nextauth.token) {
-        return NextResponse.redirect(new URL('/', req.url))
-      }
-    }
-
     return NextResponse.next()
   },
   {

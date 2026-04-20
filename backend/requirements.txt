@@ -7,3 +7,5 @@ requests
 bcrypt
 pymongo
 python-dotenv
+resend
+gunicorn

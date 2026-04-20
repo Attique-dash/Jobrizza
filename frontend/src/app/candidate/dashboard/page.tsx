@@ -37,6 +37,7 @@ import { Header } from '@/components/layout/navbar'
 import { useTheme } from '@/contexts/Themecontext'
 import { useAuth } from '@/contexts/Authcontext'
 import { useRouter } from 'next/navigation'
+import { fetchWithAuth } from '@/lib/api'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
@@ -345,9 +346,8 @@ function JobMatchesSection({ isDark, cvData }: { isDark: boolean; cvData: any | 
     if (!cvData) return
     setLoading(true)
     try {
-      const res = await fetch(`${API}/api/job-matches`, {
+      const res = await fetchWithAuth('/api/job-matches', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cv_data: cvData }),
       })
       const data = await res.json()
@@ -521,9 +521,7 @@ function CandidateProfileSection({ isDark }: { isDark: boolean }) {
           return
         }
 
-        const res = await fetch(`${API}/api/user/profile`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
+        const res = await fetchWithAuth('/api/user/profile')
         
         if (res.ok) {
           const data = await res.json()
@@ -574,12 +572,8 @@ function CandidateProfileSection({ isDark }: { isDark: boolean }) {
       const token = sessionStorage.getItem('token')
       if (!token) return
 
-      const res = await fetch(`${API}/api/user/profile`, {
+      const res = await fetchWithAuth('/api/user/profile', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify(profile)
       })
 

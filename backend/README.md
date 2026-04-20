@@ -28,7 +28,7 @@ AI-powered CV analysis and career coaching backend API built with Flask.
 
 - Python 3.9+
 - MongoDB Atlas account (or local MongoDB)
-- Anthropic API key
+- OpenRouter API key
 
 ### Installation
 
@@ -46,7 +46,7 @@ cp ../.env.example .env
 ```bash
 # Required
 MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/jobrizza
-ANTHROPIC_API_KEY=your-anthropic-api-key
+OPENROUTER_API_KEY=your-openrouter-api-key
 JWT_SECRET=your-secret-key-min-32-chars
 
 # Optional
@@ -149,7 +149,7 @@ CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
 2. Use MongoDB Atlas (not localhost)
 3. Configure `CORS_ORIGINS` for your domain
 4. Use HTTPS only
-5. Set up Anthropic API key with usage limits
+5. Set up OpenRouter API key with usage limits
 
 ## Security Notes
 
