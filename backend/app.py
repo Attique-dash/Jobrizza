@@ -60,13 +60,12 @@ network_contacts_collection    = db['network_contacts']
 JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me-in-production-32-chars!!')
 
 # ── OpenRouter AI ─────────────────────────────────────────────────────────────
-OPENROUTER_API_KEY  = os.environ.get("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_MODEL    = "google/gemma-4-26b-a4b-it:free"
-
+OPENROUTER_MODEL    = "google/gemma-4-31b-it:free"
 
 def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500, reasoning: bool = False) -> str | None:
-    """Call OpenRouter with google/gemma-4-26b-a4b-it:free. Supports reasoning."""
+    """Call OpenRouter with google/gemma-4-31b-it:free. Supports reasoning."""
     if not OPENROUTER_API_KEY:
         print("OPENROUTER_API_KEY not set – AI features disabled")
         return None
