@@ -62,11 +62,11 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me-in-production-32-chars!!')
 # ── OpenRouter AI ─────────────────────────────────────────────────────────────
 OPENROUTER_API_KEY  = os.environ.get("OPENROUTER_API_KEY")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_MODEL    = "openai/gpt-oss-120b:free"
+OPENROUTER_MODEL    = "google/gemma-4-26b-a4b-it:free"
 
 
-def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500) -> str | None:
-    """Call OpenRouter gpt-oss-120b:free. Drop-in for old call_claude()."""
+def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500, reasoning: bool = False) -> str | None:
+    """Call OpenRouter with google/gemma-4-26b-a4b-it:free. Supports reasoning."""
     if not OPENROUTER_API_KEY:
         print("OPENROUTER_API_KEY not set – AI features disabled")
         return None
@@ -82,9 +82,11 @@ def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500) -> str
         "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_prompt},
+            {"role": "user", "content": user_prompt},
         ],
     }
+    if reasoning:
+        payload["extra_body"] = {"reasoning": {"enabled": True}}
     try:
         resp = requests.post(
             f"{OPENROUTER_BASE_URL}/chat/completions",
@@ -93,7 +95,10 @@ def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500) -> str
             timeout=60,
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        result = resp.json()
+        content = result["choices"][0]["message"]["content"]
+        print(f"AI Response ({OPENROUTER_MODEL}): {content[:200]}...")
+        return content
     except requests.exceptions.Timeout:
         print("OpenRouter timeout")
         return None
@@ -453,28 +458,34 @@ Return ONLY this JSON:
         except Exception:
             pass
 
+    # Fallback: use CV's actual detected skills, don't fake missing skills
     return {
         "target_role": role,
-        "match_percentage": 65,
+        "match_percentage": 0,
         "strong_skills": cv_data.get('skills', [])[:4],
-        "missing_critical": ["System Design", "Cloud Architecture", "CI/CD Pipelines", "Performance Optimization"],
-        "missing_nice_to_have": ["GraphQL", "Kubernetes", "Terraform"],
+        "missing_critical": [],  # Don't fake this - AI needs to identify real gaps
+        "missing_nice_to_have": [],
         "market_demand": {
-            "trending_up": ["AI/ML integration", "TypeScript", "Cloud Native"],
-            "trending_down": ["jQuery", "Monolithic architectures"],
-            "salary_impact": "Adding cloud skills could increase salary by 15-25%"
+            "trending_up": [],
+            "trending_down": [],
+            "salary_impact": "Add more skills to your CV for salary impact analysis"
         },
-        "quick_wins": ["Git advanced workflows", "REST API best practices", "Basic Docker"]
+        "quick_wins": []
     }
 
 
-def ai_job_matches(cv_data: dict) -> list:
+def ai_job_matches(cv_data: dict, location: str = "Pakistan") -> list:
     skills_str = ", ".join(cv_data.get('skills', [])[:8])
 
-    prompt = f"""You are a job matching engine. Generate 6 realistic job matches.
+    prompt = f"""Generate 6 realistic job matches for Pakistan market.
 
 Candidate skills: {skills_str}
 Education: {" | ".join(cv_data.get('education', []))[:200]}
+Target market: Pakistan (Lahore, Karachi, Islamabad, Remote-Pakistan)
+
+Include salary in PKR where relevant. Use real Pakistani companies like Systems Ltd,
+10Pearls, Arbisoft, Techlets, Confiz, NetSol Technologies, Folio3, S&P Global Pakistan,
+Khired Networks, VentureDive, etc.
 
 Return ONLY this JSON array:
 [
@@ -482,11 +493,11 @@ Return ONLY this JSON array:
     "id": "j1",
     "title": "Job Title",
     "company": "Company Name",
-    "location": "City, Country",
+    "location": "Lahore/Karachi/Islamabad/Remote-Pakistan",
     "type": "Full-time/Remote/Hybrid",
-    "salary_min": 60000,
-    "salary_max": 90000,
-    "currency": "USD",
+    "salary_min": 150000,
+    "salary_max": 500000,
+    "currency": "PKR",
     "match_score": 0-100,
     "match_reasons": ["reason 1", "reason 2"],
     "skills_matched": ["skill1", "skill2"],
@@ -496,7 +507,7 @@ Return ONLY this JSON array:
   }}
 ]
 
-Generate 6 jobs with realistic companies and varying match scores (55-96%)."""
+Generate 6 jobs with realistic Pakistani companies and varying match scores (55-96%)."""
 
     result = call_ai("You are a job matching AI. Return ONLY a valid JSON array.", prompt, 1500)
     if result:
@@ -508,46 +519,25 @@ Generate 6 jobs with realistic companies and varying match scores (55-96%)."""
         except Exception:
             pass
 
-    return [
-        {"id": "j1", "title": "Senior Software Engineer", "company": "TechFlow Inc.", "location": "Remote",
-         "type": "Full-time", "salary_min": 95000, "salary_max": 130000, "currency": "USD",
-         "match_score": 92, "match_reasons": ["Strong Python skills", "Backend experience"],
-         "skills_matched": ["python", "sql", "docker"], "skills_missing": ["kubernetes"],
-         "posted_days_ago": 2, "company_size": "200-1000"},
-        {"id": "j2", "title": "Full Stack Developer", "company": "Innovate Labs", "location": "New York, NY",
-         "type": "Hybrid", "salary_min": 85000, "salary_max": 115000, "currency": "USD",
-         "match_score": 87, "match_reasons": ["React + Node.js match", "Agile experience"],
-         "skills_matched": ["react", "node.js", "mongodb"], "skills_missing": ["graphql"],
-         "posted_days_ago": 4, "company_size": "50-200"},
-        {"id": "j3", "title": "Backend Engineer", "company": "DataBridge Corp", "location": "San Francisco, CA",
-         "type": "Full-time", "salary_min": 110000, "salary_max": 145000, "currency": "USD",
-         "match_score": 79, "match_reasons": ["Database expertise", "API development"],
-         "skills_matched": ["postgresql", "python", "rest api"], "skills_missing": ["aws", "terraform"],
-         "posted_days_ago": 1, "company_size": "1000+"},
-        {"id": "j4", "title": "Frontend Developer", "company": "PixelCraft", "location": "London, UK",
-         "type": "Remote", "salary_min": 65000, "salary_max": 90000, "currency": "GBP",
-         "match_score": 74, "match_reasons": ["JavaScript proficiency", "UI skills"],
-         "skills_matched": ["javascript", "react"], "skills_missing": ["typescript", "figma"],
-         "posted_days_ago": 7, "company_size": "50-200"},
-        {"id": "j5", "title": "DevOps Engineer", "company": "CloudScale", "location": "Dubai, UAE",
-         "type": "Full-time", "salary_min": 80000, "salary_max": 110000, "currency": "USD",
-         "match_score": 65, "match_reasons": ["Docker knowledge", "Git experience"],
-         "skills_matched": ["docker", "git", "linux"], "skills_missing": ["kubernetes", "aws", "terraform"],
-         "posted_days_ago": 10, "company_size": "50-200"},
-        {"id": "j6", "title": "Data Analyst", "company": "Metrics Pro", "location": "Lahore, PK",
-         "type": "Hybrid", "salary_min": 35000, "salary_max": 55000, "currency": "USD",
-         "match_score": 71, "match_reasons": ["SQL expertise", "Data analysis skills"],
-         "skills_matched": ["sql", "python", "excel"], "skills_missing": ["tableau", "power bi"],
-         "posted_days_ago": 3, "company_size": "50-200"},
-    ]
+    # If AI fails, return empty list - frontend handles empty state gracefully
+    return []
 
 
-def ai_learning_recommendations(missing_skills: list) -> dict:
+def ai_learning_recommendations(missing_skills: list, cv_context: str = "") -> dict:
     skills_str = ", ".join(missing_skills[:6])
 
-    prompt = f"""You are a learning advisor. Generate learning resources for these skills: {skills_str}
+    prompt = f"""Generate learning resources for these skills: {skills_str}
+Context: {cv_context}
 
-Return ONLY this JSON:
+For each skill provide REAL resources from:
+- YouTube (free courses with actual channel names like "Traversy Media", "Academind", "Web Dev Simplified", "The Net Ninja")
+- Coursera (real course names from Google, Meta, IBM)
+- Udemy (real course names like "The Complete..." by Angela Yu, Maximilian Schwarzmüller)
+- Official documentation (react.dev, docs.python.org, etc.)
+- freeCodeCamp (freecodecamp.org)
+- Pakistani platforms: Digiskills.pk (FREE government platform), Corvit Systems, PIAIC, EVS
+
+Return ONLY valid JSON with real URLs where possible:
 {{
   "recommendations": [
     {{
@@ -556,9 +546,9 @@ Return ONLY this JSON:
       "estimated_hours": 20,
       "resources": [
         {{
-          "title": "Resource title",
-          "platform": "YouTube/Coursera/Udemy/FreeCodeCamp/Official Docs",
-          "url": "https://...",
+          "title": "Real Course Title",
+          "platform": "YouTube/Coursera/Udemy/Digiskills.pk/freeCodeCamp",
+          "url": "https://real-url.com/course",
           "duration": "X hours",
           "free": true/false,
           "rating": 4.5
@@ -571,7 +561,7 @@ Return ONLY this JSON:
   "total_free_hours": 40
 }}
 
-Generate 4-5 skill recommendations with 2 resources each."""
+Generate 4-5 skill recommendations with 2-3 real resources each."""
 
     result = call_ai("You are a learning advisor. Return ONLY valid JSON.", prompt, 1500)
     if result:
@@ -583,6 +573,7 @@ Generate 4-5 skill recommendations with 2 resources each."""
         except Exception:
             pass
 
+    # Fallback with real resource examples including Pakistani platforms
     recs = []
     for i, skill in enumerate(missing_skills[:5]):
         recs.append({
@@ -590,21 +581,66 @@ Generate 4-5 skill recommendations with 2 resources each."""
             "priority": "Critical" if i < 2 else "Important",
             "estimated_hours": 15 + (i * 5),
             "resources": [
-                {"title": f"Learn {skill.title()} - Full Course", "platform": "YouTube", "url": "https://youtube.com", "duration": "4 hours", "free": True, "rating": 4.5},
-                {"title": f"{skill.title()} for Professionals", "platform": "Coursera", "url": "https://coursera.org", "duration": "20 hours", "free": False, "rating": 4.6}
+                {"title": f"{skill.title()} Full Course", "platform": "YouTube", "url": f"https://youtube.com/results?search_query={skill}+course", "duration": "4-8 hours", "free": True, "rating": 4.5},
+                {"title": f"{skill.title()} Professional Certificate", "platform": "Coursera", "url": "https://coursera.org", "duration": "20 hours", "free": False, "rating": 4.6},
+                {"title": f"{skill.title()} Training", "platform": "Digiskills.pk", "url": "https://digiskills.pk", "duration": "6 weeks", "free": True, "rating": 4.3}
             ],
             "milestone": f"Build a project using {skill} to demonstrate proficiency"
         })
     return {"recommendations": recs, "learning_path_weeks": 12, "total_free_hours": 35}
 
 
+def detect_field_from_skills(skills: list) -> str:
+    """Detect job field from skills array"""
+    skill_lower = " ".join(skills).lower()
+    
+    field_keywords = {
+        "Software Engineer": ["python", "javascript", "react", "node", "java", "c++", "programming", "coding"],
+        "Data Scientist": ["python", "sql", "machine learning", "pandas", "numpy", "analytics", "statistics"],
+        "Data Analyst": ["excel", "sql", "tableau", "power bi", "analytics", "reporting"],
+        "Frontend Developer": ["html", "css", "javascript", "react", "vue", "angular", "ui"],
+        "Backend Developer": ["node", "python", "java", "database", "api", "server", "backend"],
+        "Full Stack Developer": ["full stack", "frontend", "backend", "mern", "mean"],
+        "DevOps Engineer": ["docker", "kubernetes", "aws", "azure", "ci/cd", "jenkins", "terraform"],
+        "Mobile Developer": ["android", "ios", "flutter", "react native", "swift", "kotlin"],
+        "UX/UI Designer": ["figma", "sketch", "adobe", "prototype", "wireframe", "user research"],
+        "Product Manager": ["agile", "scrum", "roadmap", "stakeholder", "product"],
+        "Digital Marketing": ["seo", "sem", "google ads", "social media", "content marketing"],
+        "Graphic Designer": ["photoshop", "illustrator", "design", "branding", "creative"],
+        "Financial Analyst": ["excel", "financial modeling", "accounting", "finance", "budgeting"],
+        "HR Professional": ["recruitment", "hr", "talent acquisition", "onboarding"],
+        "Sales Representative": ["sales", "crm", "b2b", "lead generation", "closing"],
+    }
+    
+    scores = {}
+    for field, keywords in field_keywords.items():
+        score = sum(1 for kw in keywords if kw in skill_lower)
+        if score > 0:
+            scores[field] = score
+    
+    if scores:
+        return max(scores, key=scores.get)
+    return "Professional"  # Generic fallback
+
+
 def ai_mock_interview(cv_data: dict, target_role: str = "") -> dict:
     skills = ", ".join(cv_data.get('skills', [])[:6])
-    role = target_role or "Software Engineer"
+    experience = " | ".join(cv_data.get('experience', [])[:3])
+    education = " | ".join(cv_data.get('education', [])[:2])
+    
+    # Detect field from skills if no target role given
+    if not target_role:
+        target_role = detect_field_from_skills(cv_data.get('skills', []))
+    
+    role = target_role
 
     prompt = f"""Generate a mock interview for this candidate.
 Role: {role}
 Skills: {skills}
+Experience: {experience}
+Education: {education}
+
+Based on their CV, create role-specific questions that test their expertise.
 
 Return ONLY this JSON:
 {{
@@ -622,7 +658,7 @@ Return ONLY this JSON:
   "tips": ["interview tip 1", "interview tip 2", "interview tip 3"]
 }}
 
-Generate 6 questions: 2 behavioral, 3 technical, 1 situational."""
+Generate 6 questions: 2 behavioral, 3 technical, 1 situational. Make questions specific to {role}."""
 
     result = call_ai("You are an interview coach. Return ONLY valid JSON.", prompt, 1500)
     if result:
@@ -650,42 +686,51 @@ Generate 6 questions: 2 behavioral, 3 technical, 1 situational."""
 
 def ai_salary_estimate(cv_data: dict, location: str = "") -> dict:
     skills = ", ".join(cv_data.get('skills', [])[:8])
-    loc = location or "Global/Remote"
+    loc = location or "Pakistan"
 
-    prompt = f"""Estimate salary ranges for this candidate.
+    prompt = f"""Estimate salaries for this candidate in Pakistan job market.
 Skills: {skills}
 Location: {loc}
 Experience indicators: {" | ".join(cv_data.get('experience', []))[:300]}
 
-Return ONLY this JSON:
+Include Pakistani companies: Systems Ltd, 10Pearls, Arbisoft, NetSol Technologies, Confiz,
+Folio3, Techlets, S&P Global Pakistan, Khired Networks, VentureDive, United Sol, etc.
+
+Salaries in PKR (Pakistani Rupees) with USD equivalent.
+Include cities: Lahore, Karachi, Islamabad, Remote (Pakistan).
+Base on 2024-2025 Pakistani IT market rates.
+
+Return ONLY JSON:
 {{
   "current_estimate": {{
-    "min": 50000,
-    "max": 80000,
-    "median": 65000,
-    "currency": "USD",
+    "min": 500000,
+    "max": 1500000,
+    "median": 900000,
+    "currency": "PKR",
+    "usd_equivalent": "1800-5400",
     "location": "{loc}"
   }},
   "potential_with_upskilling": {{
-    "min": 70000,
-    "max": 110000,
-    "median": 90000,
+    "min": 1000000,
+    "max": 2500000,
+    "median": 1600000,
+    "currency": "PKR",
+    "usd_equivalent": "3600-9000",
     "skills_to_add": ["skill1", "skill2"]
   }},
   "by_location": [
-    {{"city": "San Francisco", "min": 120000, "max": 180000, "currency": "USD"}},
-    {{"city": "New York", "min": 100000, "max": 155000, "currency": "USD"}},
-    {{"city": "London", "min": 65000, "max": 95000, "currency": "GBP"}},
-    {{"city": "Dubai", "min": 80000, "max": 120000, "currency": "USD"}},
-    {{"city": "Lahore", "min": 15000, "max": 35000, "currency": "USD"}},
-    {{"city": "Remote", "min": 60000, "max": 100000, "currency": "USD"}}
+    {{"city": "Lahore", "min": 600000, "max": 1800000, "currency": "PKR", "usd_equivalent": "2200-6500"}},
+    {{"city": "Karachi", "min": 700000, "max": 2000000, "currency": "PKR", "usd_equivalent": "2500-7200"}},
+    {{"city": "Islamabad", "min": 800000, "max": 2200000, "currency": "PKR", "usd_equivalent": "2900-8000"}},
+    {{"city": "Remote (Pakistan)", "min": 900000, "max": 2500000, "currency": "PKR", "usd_equivalent": "3200-9000"}}
   ],
-  "industry_comparison": {{
-    "tech_startups": "+10-20%",
-    "enterprise": "+5-10%",
-    "finance": "+15-25%",
-    "government": "-10-15%"
-  }},
+  "top_pakistani_employers": [
+    {{"company": "Systems Ltd", "level": "Enterprise", "salary_range": "High"}},
+    {{"company": "10Pearls", "level": "Mid-Large", "salary_range": "Above Market"}},
+    {{"company": "Arbisoft", "level": "Mid", "salary_range": "Market Rate"}},
+    {{"company": "NetSol Technologies", "level": "Large", "salary_range": "High"}},
+    {{"company": "Confiz", "level": "Mid", "salary_range": "Market Rate"}}
+  ],
   "negotiation_tips": ["tip 1", "tip 2", "tip 3"]
 }}"""
 
@@ -699,19 +744,44 @@ Return ONLY this JSON:
         except Exception:
             pass
 
+    # Fallback with Pakistan PKR salary data (2024-2025 market rates)
     return {
-        "current_estimate": {"min": 55000, "max": 85000, "median": 68000, "currency": "USD", "location": loc},
-        "potential_with_upskilling": {"min": 80000, "max": 120000, "median": 98000, "skills_to_add": ["AWS", "Kubernetes", "System Design"]},
+        "current_estimate": {
+            "min": 600000, 
+            "max": 1500000, 
+            "median": 900000, 
+            "currency": "PKR", 
+            "usd_equivalent": "2200-5400",
+            "location": loc
+        },
+        "potential_with_upskilling": {
+            "min": 1000000, 
+            "max": 2500000, 
+            "median": 1600000, 
+            "currency": "PKR",
+            "usd_equivalent": "3600-9000",
+            "skills_to_add": ["AWS", "Kubernetes", "System Design", "React Native"]
+        },
         "by_location": [
-            {"city": "San Francisco", "min": 120000, "max": 175000, "currency": "USD"},
-            {"city": "New York", "min": 100000, "max": 150000, "currency": "USD"},
-            {"city": "London", "min": 60000, "max": 90000, "currency": "GBP"},
-            {"city": "Dubai", "min": 80000, "max": 115000, "currency": "USD"},
-            {"city": "Lahore", "min": 12000, "max": 30000, "currency": "USD"},
-            {"city": "Remote", "min": 65000, "max": 100000, "currency": "USD"},
+            {"city": "Lahore", "min": 600000, "max": 1800000, "currency": "PKR", "usd_equivalent": "2200-6500"},
+            {"city": "Karachi", "min": 700000, "max": 2000000, "currency": "PKR", "usd_equivalent": "2500-7200"},
+            {"city": "Islamabad", "min": 800000, "max": 2200000, "currency": "PKR", "usd_equivalent": "2900-8000"},
+            {"city": "Remote (Pakistan)", "min": 900000, "max": 2500000, "currency": "PKR", "usd_equivalent": "3200-9000"},
         ],
-        "industry_comparison": {"tech_startups": "+10-20%", "enterprise": "+5-10%", "finance": "+15-25%", "government": "-10-15%"},
-        "negotiation_tips": ["Research market rates before negotiating", "Lead with your total value, not just years of experience", "Consider total compensation (equity, benefits, remote) not just base salary"]
+        "top_pakistani_employers": [
+            {"company": "Systems Ltd", "level": "Enterprise", "salary_range": "High (1.5M-3M PKR)"},
+            {"company": "10Pearls", "level": "Mid-Large", "salary_range": "Above Market (1.2M-2.5M PKR)"},
+            {"company": "Arbisoft", "level": "Mid", "salary_range": "Market Rate (800K-1.8M PKR)"},
+            {"company": "NetSol Technologies", "level": "Large", "salary_range": "High (1M-2.2M PKR)"},
+            {"company": "Confiz", "level": "Mid", "salary_range": "Market Rate (700K-1.5M PKR)"},
+            {"company": "Folio3", "level": "Mid", "salary_range": "Market Rate (600K-1.4M PKR)"},
+        ],
+        "negotiation_tips": [
+            "Research Pakistani IT market rates (Rozee.pk, LinkedIn) before negotiating", 
+            "Highlight remote work experience - Pakistani companies value global exposure", 
+            "Consider benefits like health insurance, annual bonuses, and annual leaves",
+            "Ask about professional development budget for certifications"
+        ]
     }
 
 
@@ -1095,6 +1165,17 @@ Be specific, avoid buzzwords, max 60 words."""
 @app.route('/api/cv-data', methods=['GET'])
 def get_cv_data():
     return jsonify({'cv_data': cv_data_store})
+
+
+@app.route('/api/cv-data/latest', methods=['GET'])
+@require_auth
+def get_latest_cv():
+    """Get the current user's latest CV data from database"""
+    user_id = g.user_id
+    cv = cv_data_collection.find_one({'user_id': user_id}, {'_id': 0})
+    if not cv:
+        return jsonify({'success': True, 'cv_data': None})
+    return jsonify({'success': True, 'cv_data': cv})
 
 
 # ─── CV Version History Routes ─────────────────────────────────────────────────

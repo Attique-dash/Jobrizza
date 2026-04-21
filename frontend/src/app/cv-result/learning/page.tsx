@@ -4,7 +4,7 @@ import { useTheme } from '@/contexts/Themecontext'
 import { useCV } from '@/contexts/CVContext'
 import { fetchWithAuth } from '@/lib/api'
 import { motion } from 'framer-motion'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 export default function LearningTab() {
   const { isDark } = useTheme()
@@ -16,14 +16,24 @@ export default function LearningTab() {
   const fetchLearning = async () => {
     if (!cvData) return
     setLoading(true)
-    // Use custom skills if provided, otherwise derive from CV gap (use detected skills as placeholder)
+    // Use custom skills if provided, otherwise derive from CV gap analysis
     const skillsToLearn = customSkills.trim()
       ? customSkills.split(',').map(s => s.trim()).filter(Boolean)
-      : ['Docker', 'AWS', 'System Design', 'CI/CD', 'Kubernetes']
+      : cvData?.ai_analysis?.skill_gap?.critical_skills?.slice(0, 5)
+          || cvData?.ai_analysis?.recommendations?.improvements?.slice(0, 5).map((r: any) => r.category || r.recommendation?.split(' ')[0])
+          || cvData?.skills?.slice(0, 5)
+          || ['Skill Development', 'Portfolio Building', 'Networking']
+    
+    // Build context from CV data for better recommendations
+    const cvContext = `Field: ${cvData?.field || 'General'}, Experience: ${cvData?.experience?.length || 0} roles, Target: ${cvData?.ai_analysis?.career_path?.target_role || 'Career Growth'}`
+    
     try {
       const res = await fetchWithAuth('/api/learning-recommendations', {
         method: 'POST',
-        body: JSON.stringify({ missing_skills: skillsToLearn }),
+        body: JSON.stringify({ 
+          missing_skills: skillsToLearn,
+          cv_context: cvContext 
+        }),
       })
       const data = await res.json()
       if (data.success) setLearning(data.learning)
@@ -31,6 +41,11 @@ export default function LearningTab() {
       setLoading(false)
     }
   }
+
+  // Auto-fetch on mount
+  useEffect(() => {
+    fetchLearning()
+  }, [cvData])
 
   if (!cvData) return (
     <p className="text-slate-500 text-center py-20">

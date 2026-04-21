@@ -5,8 +5,16 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export async function POST(req: NextRequest) {
   try {
-    // Check authentication
-    const authHeader = await getFlaskAuthHeader();
+    // Check authentication - try NextAuth session first, then client-provided token
+    let authHeader = await getFlaskAuthHeader();
+    
+    // Fallback: check for token in request headers (client sends from sessionStorage)
+    if (!authHeader) {
+      const clientToken = req.headers.get('x-flask-token');
+      if (clientToken) {
+        authHeader = { Authorization: `Bearer ${clientToken}` };
+      }
+    }
     
     if (!authHeader) {
       return NextResponse.json(

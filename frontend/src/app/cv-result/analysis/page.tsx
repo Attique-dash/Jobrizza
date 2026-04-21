@@ -3,6 +3,7 @@
 import { useTheme } from '@/contexts/Themecontext'
 import { useCV } from '@/contexts/CVContext'
 import { motion } from 'framer-motion'
+import { TemplateSelector } from '@/components/cv/TemplateSelector'
 
 export default function AnalysisTab() {
   const { isDark } = useTheme()
@@ -82,21 +83,18 @@ export default function AnalysisTab() {
         </div>
       )}
 
-      {/* Template Suggestion */}
+      {/* Template Suggestion with Visual Selector */}
       {ai?.template_suggestion && (
         <div className={`rounded-2xl border p-6 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
-          <h2 className={`text-lg font-bold mb-5 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>📐 Template Recommendation</h2>
-          <div className="grid sm:grid-cols-2 gap-4 mb-4">
-            <div className={`rounded-xl p-4 ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>
-              <p className={`text-xs mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Current Format</p>
-              <p className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{ai.template_suggestion.current_format}</p>
-            </div>
-            <div className={`rounded-xl p-4 bg-gradient-to-br ${isDark ? 'from-sky-500/20 to-violet-500/20 border border-sky-500/20' : 'from-sky-50 to-blue-50 border border-sky-200'}`}>
-              <p className={`text-xs mb-1 ${isDark ? 'text-sky-400' : 'text-sky-600'}`}>Recommended</p>
-              <p className={`font-bold text-xl ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{ai.template_suggestion.recommended_template}</p>
-            </div>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-4">
+          <h2 className={`text-lg font-bold mb-2 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>📐 Template Recommendation</h2>
+          <p className={`text-sm mb-5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            AI recommends: <span className="font-semibold text-sky-500">{ai.template_suggestion.recommended_template}</span>
+          </p>
+          <TemplateSelector 
+            isDark={isDark} 
+            recommendedTemplate={ai.template_suggestion.recommended_template}
+          />
+          <div className="mt-5 grid sm:grid-cols-2 gap-4">
             <div>
               <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Why this template</p>
               {ai.template_suggestion.reasons.map((r: string, i: number) => (

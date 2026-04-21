@@ -41,46 +41,6 @@ import { fetchWithAuth } from '@/lib/api'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
-// Career Roadmap static data (UI only, not duplicating backend data)
-const CAREER_ROADMAP = [
-  {
-    quarter: 'Q1 2025',
-    title: 'Skill Enhancement',
-    description: 'Master advanced React patterns and TypeScript',
-    completed: true,
-    current: false,
-    icon: BookOpenIcon,
-    milestones: ['Learn React Hooks', 'TypeScript Advanced', 'State Management'],
-  },
-  {
-    quarter: 'Q2 2025',
-    title: 'Portfolio Growth',
-    description: 'Build 3 full-stack projects with modern tech stack',
-    completed: false,
-    current: true,
-    icon: SparklesIcon,
-    milestones: ['E-commerce Platform', 'SaaS Dashboard', 'Mobile App'],
-  },
-  {
-    quarter: 'Q3 2025',
-    title: 'Leadership Skills',
-    description: 'Develop team management and mentoring capabilities',
-    completed: false,
-    current: false,
-    icon: TagIcon,
-    milestones: ['Lead a Project', 'Mentor Junior Devs', 'Code Reviews'],
-  },
-  {
-    quarter: 'Q4 2025',
-    title: 'Senior Position',
-    description: 'Secure Senior Developer role at top tech company',
-    completed: false,
-    current: false,
-    icon: TrophyIcon,
-    milestones: ['Target Companies', 'Interview Prep', 'Negotiation'],
-  },
-]
-
 // ── CV Upload ──────────────────────────────────────────────────────────────
 function CVUploadSection({ isDark, onCVUploaded }: { isDark: boolean; onCVUploaded: (data: any) => void }) {
   const [uploaded, setUploaded] = useState(false)
@@ -97,7 +57,12 @@ function CVUploadSection({ isDark, onCVUploaded }: { isDark: boolean; onCVUpload
     setFileName(acceptedFiles[0].name)
 
     try {
-      const res = await fetch('/api/cv/upload', { method: 'POST', body: formData })
+      const token = sessionStorage.getItem('token');
+      const res = await fetch('/api/cv/upload', {
+        method: 'POST',
+        headers: token ? { 'x-flask-token': token } : {},
+        body: formData
+      })
       if (!res.ok) throw new Error('Upload failed')
       const result = await res.json()
       if (result.success) {
@@ -525,34 +490,26 @@ function CandidateProfileSection({ isDark }: { isDark: boolean }) {
         
         if (res.ok) {
           const data = await res.json()
-          if (data.profile) {
+          if (data.user) {
             setProfile({
-              firstName: data.profile.firstName || data.user?.name?.split(' ')[0] || '',
-              lastName: data.profile.lastName || data.user?.name?.split(' ').slice(1).join(' ') || '',
-              email: data.user?.email || '',
-              phone: data.profile.phone || '',
-              location: data.profile.location || '',
-              bio: data.profile.bio || '',
-              website: data.profile.website || '',
-              linkedin: data.profile.linkedin || '',
-              github: data.profile.github || '',
-              jobTitle: data.profile.jobTitle || '',
-              experience: data.profile.experience || '0-2 years',
-              jobType: data.profile.jobType || 'Full-time',
-              workMode: data.profile.workMode || 'Remote',
-              expectedSalary: data.profile.expectedSalary || '',
-              availability: data.profile.availability || 'Immediately',
-              languages: data.profile.languages || [],
-              skills: data.profile.skills || [],
-            })
-          } else if (data.user) {
-            // Use basic user data if no profile exists
-            setProfile(prev => ({
-              ...prev,
-              firstName: data.user.name?.split(' ')[0] || '',
-              lastName: data.user.name?.split(' ').slice(1).join(' ') || '',
+              firstName: data.user.firstName || data.user.name?.split(' ')[0] || '',
+              lastName: data.user.lastName || data.user.name?.split(' ').slice(1).join(' ') || '',
               email: data.user.email || '',
-            }))
+              phone: data.user.phone || '',
+              location: data.user.location || '',
+              bio: data.user.bio || '',
+              website: data.user.website || '',
+              linkedin: data.user.linkedin || '',
+              github: data.user.github || '',
+              jobTitle: data.user.jobTitle || '',
+              experience: data.user.experience || '0-2 years',
+              jobType: data.user.jobType || 'Full-time',
+              workMode: data.user.workMode || 'Remote',
+              expectedSalary: data.user.expectedSalary || '',
+              availability: data.user.availability || 'Immediately',
+              languages: data.user.languages || [],
+              skills: data.user.skills || [],
+            })
           }
         }
       } catch (error) {
@@ -839,7 +796,58 @@ function CandidateProfileSection({ isDark }: { isDark: boolean }) {
 }
 
 // ── Career Roadmap ──────────────────────────────────────────────────────────
-function CareerRoadmapSection({ isDark }: { isDark: boolean }) {
+function CareerRoadmapSection({ isDark, cvData }: { isDark: boolean; cvData: any | null }) {
+  const [careerPath, setCareerPath] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+
+  // Fetch AI career path on mount when cvData is available
+  useEffect(() => {
+    if (!cvData) return
+    
+    // Use cached career path if available in cvData
+    if (cvData?.ai_analysis?.career_path?.milestones?.length > 0) {
+      setCareerPath(cvData.ai_analysis.career_path)
+      return
+    }
+    
+    const fetchCareerPath = async () => {
+      setLoading(true)
+      try {
+        const res = await fetchWithAuth('/api/career-path', {
+          method: 'POST',
+          body: JSON.stringify({ 
+            cv_data: cvData,
+            target_role: cvData?.target_role || ''
+          }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.success && data.career_path) {
+            setCareerPath(data.career_path)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch career path:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    fetchCareerPath()
+  }, [cvData])
+
+  const targetRole = careerPath?.target_role || 
+                     cvData?.ai_analysis?.career_path?.target_role || 
+                     cvData?.target_role || 
+                     'Your Target Role'
+  
+  const milestones = careerPath?.milestones?.slice(0, 3) || 
+                     cvData?.ai_analysis?.career_path?.milestones?.slice(0, 3) || [
+    { title: 'Skill Development', description: 'Build core competencies' },
+    { title: 'Experience Growth', description: 'Gain practical experience' },
+    { title: 'Career Advancement', description: 'Reach your target role' },
+  ]
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -850,70 +858,33 @@ function CareerRoadmapSection({ isDark }: { isDark: boolean }) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h3 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Career Roadmap</h3>
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Your personalized growth plan</p>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Path to: {targetRole}</p>
         </div>
         <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium
           ${isDark ? 'bg-sky-500/10 text-sky-400' : 'bg-sky-100 text-sky-700'}`}>
           <ArrowTrendingUpIcon className="h-4 w-4" />
-          Q2 Current
+          AI Powered
         </div>
       </div>
 
-      <div className="relative">
-        <div className={`absolute left-6 top-0 bottom-0 w-0.5 ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
-        <div className="space-y-6">
-          {CAREER_ROADMAP.map((step) => (
-            <div key={step.quarter} className="relative flex gap-4">
-              <div className={`relative z-10 h-12 w-12 rounded-full flex items-center justify-center flex-shrink-0
-                ${step.completed
-                  ? 'bg-emerald-500'
-                  : step.current
-                    ? 'bg-sky-500 ring-4 ' + (isDark ? 'ring-sky-500/20' : 'ring-sky-200')
-                    : isDark ? 'bg-slate-700' : 'bg-slate-300'
-                }`}>
-                <step.icon className={`h-5 w-5 ${step.completed || step.current ? 'text-white' : isDark ? 'text-slate-400' : 'text-slate-600'}`} />
-              </div>
-              <div className={`flex-1 p-4 rounded-xl border
-                ${step.current
-                  ? isDark ? 'bg-slate-800 border-sky-500/50' : 'bg-sky-50 border-sky-200'
-                  : step.completed
-                    ? isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'
-                    : isDark ? 'bg-slate-800/30 border-slate-700' : 'bg-slate-50/50 border-slate-200'
-                }`}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`text-xs font-semibold uppercase tracking-wider
-                    ${step.completed ? 'text-emerald-500' : step.current ? 'text-sky-500' : isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {step.quarter}
-                  </span>
-                  {step.completed && <CheckCircleIcon className="h-4 w-4 text-emerald-500" />}
-                  {step.current && (
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isDark ? 'bg-sky-500/20 text-sky-400' : 'bg-sky-100 text-sky-700'}`}>
-                      Current
-                    </span>
-                  )}
-                </div>
-                <h4 className={`font-semibold mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{step.title}</h4>
-                <p className={`text-sm mb-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{step.description}</p>
-                <div className="flex flex-wrap gap-2">
-                  {step.milestones.map(m => (
-                    <span key={m} className={`px-2 py-1 rounded-md text-xs
-                      ${step.completed
-                        ? 'bg-emerald-500/10 text-emerald-600'
-                        : step.current
-                          ? isDark ? 'bg-sky-500/10 text-sky-400' : 'bg-sky-100 text-sky-700'
-                          : isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'
-                      }`}>{m}</span>
-                  ))}
-                </div>
-              </div>
+      <div className="space-y-4 mb-6">
+        {milestones.map((milestone: any, idx: number) => (
+          <div key={idx} className={`flex items-start gap-3 p-3 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+            <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold
+              ${isDark ? 'bg-sky-500/20 text-sky-400' : 'bg-sky-100 text-sky-600'}`}>
+              {idx + 1}
             </div>
-          ))}
-        </div>
+            <div>
+              <h4 className={`font-medium text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{milestone.title}</h4>
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{milestone.description}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
-      <a href="/cv-result/career" className={`mt-6 w-full py-3 rounded-xl font-medium transition-colors block text-center
-        ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
-        View AI Career Path →
+      <a href="/cv-result/career" className={`w-full py-3 rounded-xl font-medium transition-colors block text-center
+        ${isDark ? 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20' : 'bg-sky-50 text-sky-600 hover:bg-sky-100'}`}>
+        View Full AI Career Path →
       </a>
     </motion.div>
   )
@@ -933,6 +904,33 @@ export default function CandidateDashboard() {
     }
     return null
   })
+
+  // Fetch latest CV from backend on mount (in case sessionStorage is empty after refresh)
+  useEffect(() => {
+    const fetchLatestCV = async () => {
+      // First try sessionStorage
+      const stored = sessionStorage.getItem('cvData')
+      if (stored) {
+        setCvData(JSON.parse(stored))
+        return
+      }
+      
+      // Then fetch from DB
+      try {
+        const res = await fetchWithAuth('/api/cv-data/latest')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.success && data.cv_data) {
+            setCvData(data.cv_data)
+            sessionStorage.setItem('cvData', JSON.stringify(data.cv_data))
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch latest CV:', error)
+      }
+    }
+    fetchLatestCV()
+  }, [])
 
   const handleCVUploaded = (data: any) => {
     setCvData(data)
@@ -1019,25 +1017,27 @@ export default function CandidateDashboard() {
 
           {activeTab === 'overview' && (
             <>
-              {/* Stats (derived from real CV data) */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                {stats.map((stat, i) => (
-                  <motion.div
-                    key={stat.name}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.1 }}
-                    className={`p-5 rounded-2xl border transition-all hover:shadow-lg
-                      ${isDark ? 'bg-slate-900 border-slate-800 hover:border-slate-700' : 'bg-white border-slate-200 shadow-sm hover:shadow-md'}`}
-                  >
-                    <div className={`p-3 rounded-xl w-fit mb-3 ${isDark ? 'bg-slate-800' : 'bg-sky-50'}`}>
-                      <stat.icon className={`h-6 w-6 ${isDark ? 'text-sky-400' : 'text-sky-600'}`} />
-                    </div>
-                    <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'} ${stat.color}`}>{stat.value}</p>
-                    <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{stat.name}</p>
-                  </motion.div>
-                ))}
-              </div>
+              {/* Stats (derived from real CV data) - only show after CV upload */}
+              {cvData && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                  {stats.map((stat, i) => (
+                    <motion.div
+                      key={stat.name}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.1 }}
+                      className={`p-5 rounded-2xl border transition-all hover:shadow-lg
+                        ${isDark ? 'bg-slate-900 border-slate-800 hover:border-slate-700' : 'bg-white border-slate-200 shadow-sm hover:shadow-md'}`}
+                    >
+                      <div className={`p-3 rounded-xl w-fit mb-3 ${isDark ? 'bg-slate-800' : 'bg-sky-50'}`}>
+                        <stat.icon className={`h-6 w-6 ${isDark ? 'text-sky-400' : 'text-sky-600'}`} />
+                      </div>
+                      <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'} ${stat.color}`}>{stat.value}</p>
+                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{stat.name}</p>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
 
               {/* Dashboard Grid */}
               <div className="grid lg:grid-cols-3 gap-6">
@@ -1049,7 +1049,7 @@ export default function CandidateDashboard() {
                   <JobMatchesSection isDark={isDark} cvData={cvData} />
                 </div>
                 <div className="lg:col-span-1">
-                  <CareerRoadmapSection isDark={isDark} />
+                  <CareerRoadmapSection isDark={isDark} cvData={cvData} />
                 </div>
               </div>
 
