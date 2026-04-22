@@ -273,8 +273,12 @@ export default function LandingPage() {
     formData.append('file', acceptedFiles[0])
 
     try {
-      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
-      const res = await fetch(`${API}/api/upload-cv`, { method: 'POST', body: formData })
+      const token = typeof window !== 'undefined' ? sessionStorage.getItem('token') : null
+      const res = await fetch('/api/cv/upload', {
+        method: 'POST',
+        headers: token ? { 'x-flask-token': token } : {},
+        body: formData
+      })
       if (!res.ok) throw new Error('Upload failed')
       const result = await res.json()
       if (result.success) {

@@ -669,17 +669,13 @@ Generate 6 questions: 2 behavioral, 3 technical, 1 situational. Make questions s
         except Exception:
             pass
 
+    # Fallback: use detected role/skills, return empty questions rather than fake data
+    role = target_role or detect_field_from_skills(cv_data.get('skills', []))
     return {
         "role": role,
-        "questions": [
-            {"id": "q1", "type": "Behavioral", "question": "Tell me about a time you faced a major technical challenge. How did you overcome it?", "hint": "Focus on problem-solving process and teamwork", "sample_answer_structure": "Situation → Task → Action → Result (STAR)", "difficulty": "Medium"},
-            {"id": "q2", "type": "Technical", "question": "Explain how you would design a scalable REST API for a high-traffic application.", "hint": "Mention caching, load balancing, database optimization", "sample_answer_structure": "Architecture overview → specific technologies → trade-offs", "difficulty": "Hard"},
-            {"id": "q3", "type": "Behavioral", "question": "Describe a situation where you had to meet a tight deadline. What was your approach?", "hint": "Show time management and prioritization skills", "sample_answer_structure": "Context → Your specific role → Steps taken → Outcome", "difficulty": "Easy"},
-            {"id": "q4", "type": "Technical", "question": "What is the difference between SQL and NoSQL databases? When would you use each?", "hint": "Cover ACID properties, scalability, use cases", "sample_answer_structure": "Define both → compare → give real-world examples", "difficulty": "Medium"},
-            {"id": "q5", "type": "Situational", "question": "If you discovered a critical bug in production 30 minutes before a major release, what would you do?", "hint": "Show decision-making under pressure and communication skills", "sample_answer_structure": "Immediate action → stakeholder communication → fix vs delay decision", "difficulty": "Hard"},
-            {"id": "q6", "type": "Technical", "question": "Walk me through how Git branching strategies work in a team environment.", "hint": "Mention feature branches, PRs, main/develop branches", "sample_answer_structure": "Strategy explanation → workflow → merge strategies", "difficulty": "Easy"},
-        ],
-        "tips": ["Research the company thoroughly before the interview", "Practice STAR method for behavioral questions", "Ask thoughtful questions about the team and tech stack", "Prepare 2-3 examples of your best projects"]
+        "questions": [],
+        "tips": ["Enable AI features to generate personalized interview questions based on your CV"],
+        "error": "AI unavailable - questions could not be generated from your CV"
     }
 
 
@@ -730,6 +726,13 @@ Return ONLY JSON:
     {{"company": "NetSol Technologies", "level": "Large", "salary_range": "High"}},
     {{"company": "Confiz", "level": "Mid", "salary_range": "Market Rate"}}
   ],
+  "industry_comparison": {{
+    "fintech": "+15%",
+    "e-commerce": "+10%",
+    "telecom": "-5%",
+    "startup": "+20%",
+    "government": "-20%"
+  }},
   "negotiation_tips": ["tip 1", "tip 2", "tip 3"]
 }}"""
 
@@ -775,9 +778,16 @@ Return ONLY JSON:
             {"company": "Confiz", "level": "Mid", "salary_range": "Market Rate (700K-1.5M PKR)"},
             {"company": "Folio3", "level": "Mid", "salary_range": "Market Rate (600K-1.4M PKR)"},
         ],
+        "industry_comparison": {
+            "fintech": "+15%",
+            "e-commerce": "+10%",
+            "telecom": "-5%",
+            "startup": "+20%",
+            "government": "-20%"
+        },
         "negotiation_tips": [
-            "Research Pakistani IT market rates (Rozee.pk, LinkedIn) before negotiating", 
-            "Highlight remote work experience - Pakistani companies value global exposure", 
+            "Research Pakistani IT market rates (Rozee.pk, LinkedIn) before negotiating",
+            "Highlight remote work experience - Pakistani companies value global exposure",
             "Consider benefits like health insurance, annual bonuses, and annual leaves",
             "Ask about professional development budget for certifications"
         ]
@@ -1928,6 +1938,8 @@ def check_and_award_badges(user_id: str, cv_score: int = None, score_improvement
         upsert=True
     )
 
+    # Remove _id before returning to prevent JSON serialization error
+    gamification.pop('_id', None)
     return new_badges, gamification
 
 

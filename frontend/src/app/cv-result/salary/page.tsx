@@ -130,7 +130,7 @@ export default function SalaryTab() {
             <div className={`rounded-2xl border p-5 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
               <h3 className={`font-bold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>🏢 Industry Comparison</h3>
               <div className="grid sm:grid-cols-2 gap-3">
-                {Object.entries(salary.industry_comparison).map(([industry, delta]) => (
+                {salary.industry_comparison && Object.entries(salary.industry_comparison).map(([industry, delta]) => (
                   <div key={industry} className={`flex items-center justify-between rounded-xl p-3 ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>
                     <span className={`text-sm capitalize font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                       {industry.replace(/_/g, ' ')}

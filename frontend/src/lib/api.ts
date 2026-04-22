@@ -21,24 +21,29 @@ export function getAuthToken(): string | null {
   return null;
 }
 
-// Helper to make authenticated API calls to Flask backend
+// Helper to make authenticated API calls to Flask backend or Next.js API routes
 export async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const token = getAuthToken();
-  
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
   };
-  
+
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  
-  const response = await fetch(`${API_URL}${endpoint}`, {
+
+  // Detect if this is a Next.js API route (starts with /api but not http)
+  // Next.js routes should use relative URL, Flask routes need API_URL prefix
+  const isNextRoute = endpoint.startsWith('/api') && !endpoint.startsWith('http');
+  const url = isNextRoute ? endpoint : `${API_URL}${endpoint}`;
+
+  const response = await fetch(url, {
     ...options,
     headers,
   });
-  
+
   if (response.status === 401) {
     // Token expired or invalid - redirect to login
     if (typeof window !== 'undefined') {
@@ -46,7 +51,7 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
     }
     throw new Error('Authentication required');
   }
-  
+
   return response;
 }
 
