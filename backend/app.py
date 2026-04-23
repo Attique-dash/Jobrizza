@@ -7,13 +7,14 @@ from dotenv import load_dotenv
 load_dotenv()
 import re
 import json
+import random
 import uuid
 import bcrypt
 import requests
 from functools import wraps
 from werkzeug.utils import secure_filename
 from pymongo import MongoClient
-from datetime import datetime, timedelta
+from datetime import datetime
 
 try:
     import PyPDF2
@@ -56,6 +57,7 @@ gamification_collection        = db['gamification']
 portfolios_collection          = db['portfolios']
 interview_gradings_collection  = db['interview_gradings']
 network_contacts_collection    = db['network_contacts']
+waitlist_collection            = db['waitlist']
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me-in-production-32-chars!!')
 
@@ -109,9 +111,6 @@ def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500, reason
         return None
 
 
-# Backward-compat alias
-call_claude = call_ai
-cv_data_store: list = []
 
 
 def allowed_file(filename):
@@ -973,6 +972,37 @@ def auth_login():
     return jsonify({'success': True, 'token': token, 'user': user_obj})
 
 
+@app.route('/api/waitlist', methods=['POST'])
+def add_to_waitlist():
+    """Add email to waitlist - stored in MongoDB instead of Supabase"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    email = data.get('email', '').strip().lower()
+
+    # Validate email
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    email_regex = r'^[^\s@]+@[^\s@]+\.[^\s@]+$'
+    if not re.match(email_regex, email):
+        return jsonify({'error': 'Invalid email format'}), 400
+
+    # Check if email already exists
+    existing = waitlist_collection.find_one({'email': email})
+    if existing:
+        return jsonify({'message': 'You are already on the waitlist!', 'email': email}), 200
+
+    # Insert into waitlist collection
+    waitlist_collection.insert_one({
+        'email': email,
+        'created_at': datetime.utcnow().isoformat(),
+    })
+
+    return jsonify({'message': 'Successfully added to waitlist', 'email': email}), 200
+
+
 @app.route('/api/user/profile', methods=['GET'])
 @require_auth
 def get_user_profile():
@@ -1043,7 +1073,6 @@ def upload_cv():
         cv_doc = {'user_id': g.user_id, 'created_at': datetime.utcnow().isoformat(), **cv_data_with_analysis}
         cv_data_collection.replace_one({'user_id': g.user_id}, cv_doc, upsert=True)
 
-    cv_data_store.append(cv_data_with_analysis)
 
     # Track gamification for CV upload
     check_and_award_badges(g.user_id, cv_score=analysis.get('percentage'))
@@ -1172,8 +1201,14 @@ Be specific, avoid buzzwords, max 60 words."""
 
 
 @app.route('/api/cv-data', methods=['GET'])
+@require_auth
 def get_cv_data():
-    return jsonify({'cv_data': cv_data_store})
+    """Get current user's CV data from database (replaces insecure in-memory store)"""
+    user_id = g.user_id
+    cv = cv_data_collection.find_one({'user_id': user_id}, {'_id': 0})
+    if not cv:
+        return jsonify({'success': True, 'cv_data': None})
+    return jsonify({'success': True, 'cv_data': cv})
 
 
 @app.route('/api/cv-data/latest', methods=['GET'])
@@ -1763,7 +1798,7 @@ def send_test_job_alert():
         params = {
             "from": "Job Alerts <alerts@yourdomain.com>",
             "to": [user['email']],
-            "subject": f"Test: Your Daily Job Matches - {datetime.now().strftime('%b %d, %Y')}",
+            "subject": f"Test: Your Daily Job Matches - {datetime.utcnow().strftime('%b %d, %Y')}",
             "html": html_content
         }
 
@@ -2350,7 +2385,6 @@ Please grade this interview answer using the STAR methodology."""
         # Parse AI response
         try:
             # Extract JSON from response
-            import json
             start_idx = ai_response.find('{')
             end_idx = ai_response.rfind('}') + 1
             if start_idx >= 0 and end_idx > start_idx:
@@ -2477,7 +2511,6 @@ def get_interview_questions():
     }
 
     category_questions = questions.get(category, questions['behavioral'])
-    import random
     sample = random.sample(category_questions, min(5, len(category_questions)))
 
     return jsonify({

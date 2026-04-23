@@ -253,9 +253,25 @@ export default function GamificationPage() {
               </div>
 
               {userProfile.badges.length === 0 ? (
-                <div className={`text-center py-8 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                  <LockClosedIcon className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No badges yet. Start by uploading your CV!</p>
+                <div className={`text-center py-8 rounded-xl border-2 border-dashed ${isDark ? 'border-slate-700 bg-slate-800/30' : 'border-slate-300 bg-slate-50'}`}>
+                  <div className="flex justify-center gap-3 mb-4">
+                    <span className="text-4xl animate-bounce" style={{ animationDelay: '0ms' }}>🏆</span>
+                    <span className="text-4xl animate-bounce" style={{ animationDelay: '150ms' }}>⭐</span>
+                    <span className="text-4xl animate-bounce" style={{ animationDelay: '300ms' }}>🎯</span>
+                  </div>
+                  <h4 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    Start Your Journey!
+                  </h4>
+                  <p className={`max-w-sm mx-auto mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Upload your CV to unlock your first badge and begin earning achievements
+                  </p>
+                  <a 
+                    href="/candidate/dashboard" 
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 transition-all"
+                  >
+                    <DocumentArrowUpIcon className="h-5 w-5" />
+                    Upload CV Now
+                  </a>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
@@ -264,8 +280,8 @@ export default function GamificationPage() {
                       key={badge.id}
                       initial={{ scale: 0.8, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
-                      className={`p-4 rounded-xl text-center transition-all hover:scale-105 cursor-pointer
-                        ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-50 hover:bg-slate-100'}`}
+                      className={`p-4 rounded-xl text-center transition-all hover:scale-105 cursor-pointer border-2
+                        ${isDark ? 'bg-slate-800 border-amber-500/30 hover:border-amber-500/60' : 'bg-amber-50 border-amber-200 hover:border-amber-400'}`}
                       title={badge.description}
                     >
                       <div className="text-3xl mb-2">{badge.icon}</div>
@@ -273,7 +289,7 @@ export default function GamificationPage() {
                         {badge.name}
                       </p>
                       <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {new Date(badge.awarded_at).toLocaleDateString()}
+                        Earned {new Date(badge.awarded_at).toLocaleDateString()}
                       </p>
                     </motion.div>
                   ))}
@@ -338,9 +354,19 @@ export default function GamificationPage() {
               </h3>
 
               {leaderboard.length === 0 ? (
-                <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                  No leaderboard data yet. Be the first to earn badges!
-                </p>
+                <div className={`text-center py-6 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+                  <div className="flex justify-center gap-2 mb-3">
+                    <span className="text-2xl">🥇</span>
+                    <span className="text-2xl">🥈</span>
+                    <span className="text-2xl">🥉</span>
+                  </div>
+                  <p className={`text-sm font-medium mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    Be the First!
+                  </p>
+                  <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    Earn badges to climb the leaderboard
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-3">
                   {leaderboard.map((entry, idx) => (

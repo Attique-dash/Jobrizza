@@ -7,7 +7,7 @@ export interface User {
   id: string
   name: string
   email: string
-  userType: 'candidate'
+  userType: 'candidate' | 'recruiter'
   avatar?: string
   createdAt?: string
 }
@@ -62,9 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error(flaskData.error || 'Login failed')
     }
     
-    // Store Flask token in sessionStorage for API calls
+    // Store Flask token in localStorage for API calls (persists across refreshes)
     if (typeof window !== 'undefined' && flaskData.token) {
-      sessionStorage.setItem('token', flaskData.token)
+      localStorage.setItem('token', flaskData.token)
     }
     
     // Then authenticate with NextAuth for session management
@@ -92,7 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Store Flask token if provided
     if (typeof window !== 'undefined' && data.token) {
-      sessionStorage.setItem('token', data.token)
+      localStorage.setItem('token', data.token)
     }
 
     // Auto login with NextAuth after registration
@@ -100,9 +100,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const logout = () => {
-    // Clear Flask token from sessionStorage
+    // Clear Flask token from localStorage
     if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('token')
+      localStorage.removeItem('token')
     }
     signOut({ callbackUrl: '/' })
   }

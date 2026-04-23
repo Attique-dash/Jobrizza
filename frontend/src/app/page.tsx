@@ -273,7 +273,7 @@ export default function LandingPage() {
     formData.append('file', acceptedFiles[0])
 
     try {
-      const token = typeof window !== 'undefined' ? sessionStorage.getItem('token') : null
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch('/api/cv/upload', {
         method: 'POST',
         headers: token ? { 'x-flask-token': token } : {},

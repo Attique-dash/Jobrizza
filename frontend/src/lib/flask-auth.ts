@@ -3,7 +3,7 @@
  * Flask expects: "Bearer token_<user_id>"
  */
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { authOptions } from '@/lib/auth-options';
 
 export async function getFlaskAuthHeader(): Promise<{ Authorization: string } | null> {
   const session = await getServerSession(authOptions);

@@ -57,7 +57,7 @@ function CVUploadSection({ isDark, onCVUploaded }: { isDark: boolean; onCVUpload
     setFileName(acceptedFiles[0].name)
 
     try {
-      const token = sessionStorage.getItem('token');
+      const token = localStorage.getItem('token');
       const res = await fetch('/api/cv/upload', {
         method: 'POST',
         headers: token ? { 'x-flask-token': token } : {},
@@ -480,7 +480,7 @@ function CandidateProfileSection({ isDark }: { isDark: boolean }) {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const token = sessionStorage.getItem('token')
+        const token = localStorage.getItem('token')
         if (!token) {
           setIsLoading(false)
           return
@@ -526,7 +526,7 @@ function CandidateProfileSection({ isDark }: { isDark: boolean }) {
   const handleSave = async () => {
     setIsSaving(true)
     try {
-      const token = sessionStorage.getItem('token')
+      const token = localStorage.getItem('token')
       if (!token) return
 
       const res = await fetchWithAuth('/api/user/profile', {
@@ -991,7 +991,7 @@ export default function CandidateDashboard() {
           {/* Tabs */}
           <div className="mt-8 border-b border-slate-200 dark:border-slate-700">
             <nav className="-mb-px flex space-x-8 overflow-x-auto">
-              {['overview', 'profile', 'applications', 'saved', 'analytics'].map((tab) => (
+              {['overview', 'profile'].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -1085,17 +1085,6 @@ export default function CandidateDashboard() {
             </>
           )}
 
-          {(activeTab === 'applications' || activeTab === 'saved' || activeTab === 'analytics') && (
-            <div className={`p-12 rounded-2xl border text-center
-              ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-              <div className={`inline-flex items-center justify-center h-20 w-20 rounded-full mb-4
-                ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
-                <BriefcaseIcon className={`h-10 w-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
-              </div>
-              <h3 className={`text-xl font-semibold mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>Coming Soon</h3>
-              <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>This section is under development. Check back soon!</p>
-            </div>
-          )}
         </div>
       </main>
     </div>

@@ -1,17 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 
-// Helper function to get Supabase client (lazy initialization)
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return null
-  }
-
-  return createClient(supabaseUrl, supabaseAnonKey)
-}
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,50 +24,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get Supabase client (returns null if not configured)
-    const supabase = getSupabaseClient()
+    // Forward to Flask backend (MongoDB storage)
+    const res = await fetch(`${API}/api/waitlist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.toLowerCase().trim() }),
+    })
 
-    // If Supabase is not configured, still accept the email but log it
-    if (!supabase) {
-      console.log('Supabase not configured. Email received:', email)
-      // Still return success to user, but log the email
-      return NextResponse.json(
-        { message: 'Email received (stored locally)', email },
-        { status: 200 }
-      )
-    }
-
-    // Insert email into waitlist table
-    const { data, error } = await supabase
-      .from('waitlist')
-      .insert([
-        {
-          email: email.toLowerCase().trim(),
-          created_at: new Date().toISOString(),
-        },
-      ])
-      .select()
-
-    if (error) {
-      // If it's a duplicate email error, still return success
-      if (error.code === '23505' || error.message.includes('duplicate')) {
-        return NextResponse.json(
-          { message: 'You are already on the waitlist!', email },
-          { status: 200 }
-        )
-      }
-
-      console.error('Supabase error:', error)
-      return NextResponse.json(
-        { error: 'Failed to add email to waitlist' },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json(
-      { message: 'Successfully added to waitlist', email: data[0]?.email },
-      { status: 200 }
-    )
+    const data = await res.json()
+    return NextResponse.json(data, { status: res.status })
   } catch (error) {
     console.error('Waitlist API error:', error)
     return NextResponse.json(

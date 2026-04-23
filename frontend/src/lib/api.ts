@@ -1,23 +1,12 @@
 // API helper with authentication support
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-// Get auth token from sessionStorage (set by login)
+// Get auth token from localStorage (persists across page refreshes)
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  // Try to get from sessionStorage where login stores it
-  const token = sessionStorage.getItem('token');
+  // Try to get from localStorage where login stores it
+  const token = localStorage.getItem('token');
   if (token) return token;
-  
-  // Fallback: try to get from next-auth session if available
-  const sessionStr = sessionStorage.getItem('next-auth.session-token');
-  if (sessionStr) {
-    try {
-      const session = JSON.parse(sessionStr);
-      return session?.token || null;
-    } catch {
-      return null;
-    }
-  }
   return null;
 }
 
@@ -58,13 +47,13 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
 // Store auth token (call this after login)
 export function setAuthToken(token: string) {
   if (typeof window !== 'undefined') {
-    sessionStorage.setItem('token', token);
+    localStorage.setItem('token', token);
   }
 }
 
 // Clear auth token (call on logout)
 export function clearAuthToken() {
   if (typeof window !== 'undefined') {
-    sessionStorage.removeItem('token');
+    localStorage.removeItem('token');
   }
 }
