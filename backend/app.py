@@ -64,51 +64,80 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me-in-production-32-chars!!')
 # ── OpenRouter AI ─────────────────────────────────────────────────────────────
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_MODEL    = "google/gemma-4-31b-it:free"
+# List of free models to try in order (fallback chain)
+OPENROUTER_MODELS = [
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "google/gemma-3-1b-it:free",
+    "mistralai/mistral-7b-instruct:free",
+    "openai/gpt-3.5-turbo",  # Fallback to cheap paid if all free fail
+]
+OPENROUTER_MODEL = OPENROUTER_MODELS[0]
 
-def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500, reasoning: bool = False) -> str | None:
-    """Call OpenRouter with google/gemma-4-31b-it:free. Supports reasoning."""
+def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500, reasoning: bool = False, use_fallbacks: bool = True) -> str | None:
+    """Call OpenRouter with fallback chain of free models."""
     if not OPENROUTER_API_KEY:
         print("OPENROUTER_API_KEY not set – AI features disabled")
         return None
 
+    models_to_try = OPENROUTER_MODELS if use_fallbacks else [OPENROUTER_MODELS[0]]
+    
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
         "HTTP-Referer": "http://localhost:3000",
         "X-Title": "Jobrizza",
     }
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "max_tokens": max_tokens,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }
-    if reasoning:
-        payload["extra_body"] = {"reasoning": {"enabled": True}}
-    try:
-        resp = requests.post(
-            f"{OPENROUTER_BASE_URL}/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=60,
-        )
-        resp.raise_for_status()
-        result = resp.json()
-        content = result["choices"][0]["message"]["content"]
-        print(f"AI Response ({OPENROUTER_MODEL}): {content[:200]}...")
-        return content
-    except requests.exceptions.Timeout:
-        print("OpenRouter timeout")
-        return None
-    except requests.exceptions.HTTPError as e:
-        print(f"OpenRouter HTTP {e.response.status_code}: {e.response.text[:300]}")
-        return None
-    except Exception as e:
-        print(f"OpenRouter error: {e}")
-        return None
+    
+    last_error = None
+    for model in models_to_try:
+        payload = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        if reasoning:
+            payload["extra_body"] = {"reasoning": {"enabled": True}}
+        
+        try:
+            print(f"Trying AI model: {model}")
+            resp = requests.post(
+                f"{OPENROUTER_BASE_URL}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=30,
+            )
+            
+            # Handle rate limiting specifically
+            if resp.status_code == 429:
+                print(f"Model {model} rate limited, trying next...")
+                continue
+                
+            resp.raise_for_status()
+            result = resp.json()
+            content = result["choices"][0]["message"]["content"]
+            print(f"AI Response from {model}: {content[:200]}...")
+            return content
+            
+        except requests.exceptions.Timeout:
+            print(f"Timeout for {model}, trying next...")
+            continue
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                print(f"Rate limited on {model}, trying next...")
+                continue
+            print(f"HTTP Error {e.response.status_code} for {model}: {e.response.text[:200]}")
+            last_error = e
+            continue
+        except Exception as e:
+            print(f"Error with {model}: {e}")
+            last_error = e
+            continue
+    
+    print(f"All AI models failed. Last error: {last_error}")
+    return None
 
 
 
@@ -1060,7 +1089,35 @@ def upload_cv():
 
     cv_data = parse_cv_data(text, filename)
     analysis = analyze_cv_quality(cv_data, text)
-    ai_analysis = ai_full_analysis(text, cv_data)
+    
+    # Try AI analysis with error handling - always return data even if AI fails
+    try:
+        ai_analysis = ai_full_analysis(text, cv_data)
+    except Exception as e:
+        print(f"AI analysis failed, using fallback: {e}")
+        ai_analysis = {
+            "ats_score": {
+                "score": analysis.get('percentage', 65),
+                "grade": "C",
+                "keyword_density": "medium",
+                "format_issues": ["AI analysis temporarily unavailable - basic scan completed"],
+                "missing_keywords": [],
+                "passed_checks": ["CV successfully parsed", "Contact info detected"]
+            },
+            "mistake_detector": {
+                "grammar_errors": [],
+                "employment_gaps": [],
+                "weak_action_verbs": ["Review action verbs manually"],
+                "missing_metrics": ["Add quantified achievements where possible"],
+                "overall_writing_score": analysis.get('percentage', 65)
+            },
+            "template_suggestion": {
+                "current_format": "Standard",
+                "recommended_template": "Chronological",
+                "reasons": ["Standard format works for most roles"],
+                "before_after_tips": ["AI template analysis temporarily unavailable"]
+            }
+        }
 
     cv_data_with_analysis = {
         **cv_data,

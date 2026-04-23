@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.OPENROUTER_API_KEY;
 
     if (!apiKey) {
+      console.error('OPENROUTER_API_KEY not set');
       return NextResponse.json({
         reply:
           "I'm currently running in limited mode. Here's some general career advice:\n\n" +
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
         'X-Title': 'Jobrizza',
       },
       body: JSON.stringify({
-        model: 'google/gemma-4-31b-it:free',
+        model: 'meta-llama/llama-3.2-3b-instruct:free',  // Will try fallbacks if this fails
         max_tokens: 1024,
         messages: [
           {
@@ -55,6 +56,46 @@ If asked about technical topics, provide practical, up-to-date advice.`,
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       console.error('OpenRouter API error:', response.status, errorData);
+      
+      // If rate limited, try fallback models
+      if (response.status === 429) {
+        const fallbackModels = ['google/gemma-3-1b-it:free', 'mistralai/mistral-7b-instruct:free'];
+        for (const model of fallbackModels) {
+          console.log(`Trying fallback model: ${model}`);
+          const fallbackResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+              'HTTP-Referer': process.env.NEXTAUTH_URL || 'http://localhost:3000',
+              'X-Title': 'Jobrizza',
+            },
+            body: JSON.stringify({
+              model,
+              max_tokens: 1024,
+              messages: [
+                {
+                  role: 'system',
+                  content: `You are Jobby, a helpful career AI assistant for Jobrizza, a recruitment platform.
+You help users with CV tips, interview preparation, career advice, and job searching.
+Keep responses concise, friendly, and actionable. Use markdown formatting for clarity.
+If asked about technical topics, provide practical, up-to-date advice.`,
+                },
+                ...messages.map((m: ChatMessage) => ({
+                  role: m.role,
+                  content: m.content,
+                })),
+              ],
+            }),
+          });
+          if (fallbackResp.ok) {
+            const data = await fallbackResp.json();
+            const reply = data.choices?.[0]?.message?.content || "I couldn't generate a response.";
+            return NextResponse.json({ reply, model });
+          }
+        }
+      }
+      
       throw new Error(`API error: ${response.status}`);
     }
 

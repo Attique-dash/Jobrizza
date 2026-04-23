@@ -32,6 +32,7 @@ import {
   CheckIcon,
   XMarkIcon,
   PlusIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline'
 import { Header } from '@/components/layout/navbar'
 import { useTheme } from '@/contexts/Themecontext'
@@ -42,11 +43,22 @@ import { fetchWithAuth } from '@/lib/api'
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
 // ── CV Upload ──────────────────────────────────────────────────────────────
-function CVUploadSection({ isDark, onCVUploaded }: { isDark: boolean; onCVUploaded: (data: any) => void }) {
+function CVUploadSection({ isDark, onCVUploaded, cvData }: { isDark: boolean; onCVUploaded: (data: any) => void; cvData: any | null }) {
   const [uploaded, setUploaded] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState('')
+
+  // Sync uploaded state with cvData prop
+  useEffect(() => {
+    if (cvData?.filename) {
+      setUploaded(true)
+      setFileName(cvData.filename)
+    } else {
+      setUploaded(false)
+      setFileName('')
+    }
+  }, [cvData])
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (!acceptedFiles.length) return
@@ -69,6 +81,7 @@ function CVUploadSection({ isDark, onCVUploaded }: { isDark: boolean; onCVUpload
         sessionStorage.setItem('cvData', JSON.stringify(result.data))
         onCVUploaded(result.data)
         setUploaded(true)
+        setFileName(result.data.filename || acceptedFiles[0].name)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed. Is the backend running?')
@@ -454,24 +467,28 @@ function CandidateProfileSection({ isDark }: { isDark: boolean }) {
   const [isEditing, setIsEditing] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
-  const [profile, setProfile] = useState<ProfileData>({
-    firstName: '',
-    lastName: '',
-    email: '',
-    phone: '',
-    location: '',
-    bio: '',
-    website: '',
-    linkedin: '',
-    github: '',
-    jobTitle: '',
-    experience: '0-2 years',
-    jobType: 'Full-time',
-    workMode: 'Remote',
-    expectedSalary: '',
-    availability: 'Immediately',
-    languages: [],
-    skills: [],
+  // Initialize profile with auth user data
+  const [profile, setProfile] = useState<ProfileData>(() => {
+    const nameParts = user?.name?.split(' ') || ['', '']
+    return {
+      firstName: nameParts[0] || '',
+      lastName: nameParts.slice(1).join(' ') || '',
+      email: user?.email || '',
+      phone: '',
+      location: '',
+      bio: '',
+      website: '',
+      linkedin: '',
+      github: '',
+      jobTitle: '',
+      experience: '0-2 years',
+      jobType: 'Full-time',
+      workMode: 'Remote',
+      expectedSalary: '',
+      availability: 'Immediately',
+      languages: [],
+      skills: [],
+    }
   })
   const [newSkill, setNewSkill] = useState('')
   const [newLanguage, setNewLanguage] = useState('')
@@ -639,58 +656,6 @@ function CandidateProfileSection({ isDark }: { isDark: boolean }) {
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-
-        {/* Job Preferences */}
-        <div className={`p-5 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
-          <h4 className={`font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-            <BriefcaseIcon className="h-5 w-5 text-sky-500" /> Job Preferences
-          </h4>
-          <div className="space-y-3">
-            <div>
-              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Desired Job Title</label>
-              {isEditing
-                ? <input type="text" value={profile.jobTitle} onChange={e => setProfile({ ...profile, jobTitle: e.target.value })} className={inputClass} />
-                : <p className={`font-medium text-sm ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{profile.jobTitle}</p>}
-            </div>
-            <div className="grid sm:grid-cols-2 gap-3">
-              {[
-                { key: 'experience', label: 'Experience', options: ['0-2 years', '3-5 years', '5-8 years', '8+ years'] },
-                { key: 'jobType', label: 'Job Type', options: ['Full-time', 'Part-time', 'Contract', 'Freelance', 'Internship'] },
-                { key: 'workMode', label: 'Work Mode', options: ['Remote', 'On-site', 'Hybrid'] },
-              ].map(({ key, label, options }) => (
-                <div key={key}>
-                  <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{label}</label>
-                  {isEditing
-                    ? <select value={profile[key as keyof typeof profile] as string} onChange={e => setProfile({ ...profile, [key]: e.target.value })}
-                        className={inputClass}>
-                        {options.map(o => <option key={o}>{o}</option>)}
-                      </select>
-                    : <p className={`font-medium text-sm ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{profile[key as keyof typeof profile] as string}</p>}
-                </div>
-              ))}
-            </div>
-            <div>
-              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Expected Salary</label>
-              <div className="flex items-center gap-2">
-                <BanknotesIcon className={`h-4 w-4 flex-shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
-                {isEditing
-                  ? <input type="text" value={profile.expectedSalary} onChange={e => setProfile({ ...profile, expectedSalary: e.target.value })} className={`flex-1 ${inputClass}`} />
-                  : <p className={`font-medium text-sm ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{profile.expectedSalary}</p>}
-              </div>
-            </div>
-            <div>
-              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Availability</label>
-              <div className="flex items-center gap-2">
-                <AvailabilityIcon className={`h-4 w-4 flex-shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
-                {isEditing
-                  ? <select value={profile.availability} onChange={e => setProfile({ ...profile, availability: e.target.value })} className={`flex-1 ${inputClass}`}>
-                      {['Immediately', '1 week notice', '2 weeks notice', '1 month notice', '2+ months notice'].map(o => <option key={o}>{o}</option>)}
-                    </select>
-                  : <p className={`font-medium text-sm ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{profile.availability}</p>}
-              </div>
-            </div>
           </div>
         </div>
 
@@ -890,20 +855,144 @@ function CareerRoadmapSection({ isDark, cvData }: { isDark: boolean; cvData: any
   )
 }
 
+// ── CV History Section ─────────────────────────────────────────────────────
+function CVHistorySection({ isDark }: { isDark: boolean }) {
+  const [versions, setVersions] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedVersion, setSelectedVersion] = useState<any | null>(null)
+
+  useEffect(() => {
+    const fetchVersions = async () => {
+      try {
+        const res = await fetchWithAuth('/api/cv-versions')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.success) {
+            setVersions(data.versions || [])
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch CV versions:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchVersions()
+  }, [])
+
+  const loadVersion = (version: any) => {
+    setSelectedVersion(version)
+    if (version.cv_data) {
+      sessionStorage.setItem('cvData', JSON.stringify(version.cv_data))
+      window.location.href = '/cv-result'
+    }
+  }
+
+  const deleteVersion = async (versionId: string) => {
+    try {
+      const res = await fetchWithAuth(`/api/cv-versions/${versionId}`, { method: 'DELETE' })
+      if (res.ok) {
+        setVersions(versions.filter(v => v.id !== versionId))
+      }
+    } catch (error) {
+      console.error('Failed to delete version:', error)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className={`rounded-2xl p-8 border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-lg'}`}>
+        <div className="flex items-center justify-center py-8">
+          <div className="h-8 w-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`rounded-2xl p-6 border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-lg'}`}
+    >
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>CV History</h3>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Your previously uploaded CV versions</p>
+        </div>
+        <div className={`p-2 rounded-lg ${isDark ? 'bg-sky-500/20' : 'bg-sky-50'}`}>
+          <DocumentTextIcon className="h-5 w-5 text-sky-500" />
+        </div>
+      </div>
+
+      {versions.length === 0 ? (
+        <div className={`text-center py-8 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No CV history yet</p>
+          <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Upload a CV to see it here</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {versions.map((version, index) => (
+            <div
+              key={version.id}
+              className={`p-4 rounded-xl border transition-all group
+                ${isDark
+                  ? 'bg-slate-800 border-slate-700 hover:border-sky-500/50'
+                  : 'bg-slate-50 border-slate-200 hover:border-sky-300 hover:shadow-md'
+                }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-sky-500/20 text-sky-400' : 'bg-sky-100 text-sky-600'}`}>
+                      V{versions.length - index}
+                    </span>
+                    <h4 className={`font-semibold text-sm truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      {version.name || version.cv_data?.filename || 'Unnamed CV'}
+                    </h4>
+                  </div>
+                  <div className={`flex items-center gap-3 mt-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <span>{version.created_at ? new Date(version.created_at).toLocaleDateString() : 'Unknown date'}</span>
+                    {version.score > 0 && (
+                      <span className={`font-medium ${version.score >= 70 ? 'text-emerald-400' : version.score >= 50 ? 'text-sky-400' : 'text-amber-400'}`}>
+                        Score: {version.score}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => loadVersion(version)}
+                    className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-sky-500/20 text-sky-400' : 'hover:bg-sky-100 text-sky-600'}`}
+                    title="Load this version"
+                  >
+                    <ArrowTrendingUpIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => deleteVersion(version.id)}
+                    className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-rose-500/20 text-rose-400' : 'hover:bg-rose-100 text-rose-600'}`}
+                    title="Delete version"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
 // ── Main Dashboard ──────────────────────────────────────────────────────────
 export default function CandidateDashboard() {
   const { isDark } = useTheme()
   const { user } = useAuth()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('overview')
-  const [cvData, setCvData] = useState<any | null>(() => {
-    // Try to restore from sessionStorage on mount
-    if (typeof window !== 'undefined') {
-      const stored = sessionStorage.getItem('cvData')
-      return stored ? JSON.parse(stored) : null
-    }
-    return null
-  })
+  const [cvData, setCvData] = useState<any | null>(null)
+  const [cvDataLoaded, setCvDataLoaded] = useState(false)
 
   // Fetch latest CV from backend on mount (in case sessionStorage is empty after refresh)
   useEffect(() => {
@@ -912,6 +1001,7 @@ export default function CandidateDashboard() {
       const stored = sessionStorage.getItem('cvData')
       if (stored) {
         setCvData(JSON.parse(stored))
+        setCvDataLoaded(true)
         return
       }
       
@@ -927,6 +1017,8 @@ export default function CandidateDashboard() {
         }
       } catch (error) {
         console.error('Failed to fetch latest CV:', error)
+      } finally {
+        setCvDataLoaded(true)
       }
     }
     fetchLatestCV()
@@ -977,7 +1069,7 @@ export default function CandidateDashboard() {
                 Welcome back, <span className="text-sky-500">{user?.name?.split(' ')[0] || 'there'}</span>! 👋
               </h1>
               <p className={`mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                {cvData
+                {cvDataLoaded && cvData
                   ? `CV analyzed · ${cvData.skills?.length ?? 0} skills detected · Score: ${cvData.analysis?.percentage ?? '?'}%`
                   : 'Upload your CV below to get AI-powered insights and job matches.'}
               </p>
@@ -991,7 +1083,7 @@ export default function CandidateDashboard() {
           {/* Tabs */}
           <div className="mt-8 border-b border-slate-200 dark:border-slate-700">
             <nav className="-mb-px flex space-x-8 overflow-x-auto">
-              {['overview', 'profile'].map((tab) => (
+              {['overview', 'profile', 'history'].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -1014,6 +1106,35 @@ export default function CandidateDashboard() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
 
           {activeTab === 'profile' && <CandidateProfileSection isDark={isDark} />}
+
+          {activeTab === 'history' && (
+            <div className="grid lg:grid-cols-2 gap-6">
+              <CVHistorySection isDark={isDark} />
+              <div className="space-y-6">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`rounded-2xl p-6 border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-lg'}`}
+                >
+                  <h3 className={`text-lg font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>Tips</h3>
+                  <ul className={`space-y-3 text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    <li className="flex items-start gap-2">
+                      <span className="text-sky-500">•</span>
+                      <span>Click the arrow icon to load a previous CV version</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-sky-500">•</span>
+                      <span>Delete old versions to keep your history clean</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-sky-500">•</span>
+                      <span>Each upload creates a new version automatically</span>
+                    </li>
+                  </ul>
+                </motion.div>
+              </div>
+            </div>
+          )}
 
           {activeTab === 'overview' && (
             <>
@@ -1042,7 +1163,7 @@ export default function CandidateDashboard() {
               {/* Dashboard Grid */}
               <div className="grid lg:grid-cols-3 gap-6">
                 <div className="space-y-6">
-                  <CVUploadSection isDark={isDark} onCVUploaded={handleCVUploaded} />
+                  <CVUploadSection isDark={isDark} onCVUploaded={handleCVUploaded} cvData={cvData} />
                   <ATSScoreSection isDark={isDark} cvData={cvData} />
                 </div>
                 <div className="lg:col-span-1">

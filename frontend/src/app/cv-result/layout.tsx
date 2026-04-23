@@ -37,7 +37,7 @@ export default function CVTabLayout({ children }: { children: React.ReactNode })
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide py-2">
             <Link
-              href="/cv-result"
+              href="/candidate/dashboard"
               className={`flex-shrink-0 text-xs px-3 py-2 rounded-lg font-medium mr-2 transition-colors
                 ${isDark ? 'text-slate-400 hover:text-sky-400 hover:bg-sky-500/10' : 'text-slate-500 hover:text-sky-600 hover:bg-sky-50'}`}
             >

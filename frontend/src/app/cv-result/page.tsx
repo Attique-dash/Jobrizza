@@ -2,7 +2,6 @@
 
 import { useTheme } from '@/contexts/Themecontext'
 import { useAuth } from '@/contexts/Authcontext'
-import { Header } from '@/components/layout/navbar'
 import { AnimatePresence, motion } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -75,7 +74,6 @@ export default function CVResultPage() {
 
   if (!cvData) return (
     <div className={`min-h-screen flex flex-col items-center justify-center gap-6 ${isDark ? 'bg-slate-950 text-white' : 'bg-white text-slate-900'}`}>
-      <Header />
       <div className="text-6xl">📄</div>
       <h1 className="text-3xl font-bold">No CV Data Found</h1>
       <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>Upload a CV first to see your analysis.</p>
@@ -88,8 +86,6 @@ export default function CVResultPage() {
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
-      <Header />
-
       {/* ── Summary header ── */}
       <div className={`border-b ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
