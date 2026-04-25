@@ -1119,17 +1119,42 @@ def upload_cv():
             }
         }
 
+    # Get user's email from the authenticated user
+    user_email = g.current_user.get('email') if hasattr(g, 'current_user') else None
+    user_name = g.current_user.get('name') if hasattr(g, 'current_user') else None
+
     cv_data_with_analysis = {
         **cv_data,
+        'user_id': g.user_id,
+        'user_email': user_email,  # Store the authenticated user's email
+        'user_name': user_name,    # Store the authenticated user's name
+        'created_at': datetime.utcnow().isoformat(),
         'analysis': analysis,
         'ai_analysis': ai_analysis,
     }
 
-    # Persist to MongoDB
+    # Persist to MongoDB - use replace_one with upsert to always keep the latest CV per user
     if hasattr(g, 'user_id'):
-        cv_doc = {'user_id': g.user_id, 'created_at': datetime.utcnow().isoformat(), **cv_data_with_analysis}
-        cv_data_collection.replace_one({'user_id': g.user_id}, cv_doc, upsert=True)
+        cv_data_collection.replace_one({'user_id': g.user_id}, cv_data_with_analysis, upsert=True)
 
+    # Also save as a version for history tracking
+    if hasattr(g, 'user_id'):
+        version_id = str(uuid.uuid4())
+        category_scores = {}
+        if analysis.get('categories'):
+            for key, cat in analysis['categories'].items():
+                category_scores[key.replace('_', ' ').title()] = round((cat['score'] / cat['max']) * 100)
+
+        version_doc = {
+            'id': version_id,
+            'user_id': g.user_id,
+            'name': f"CV Upload {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            'cv_data': cv_data_with_analysis,
+            'score': analysis.get('percentage', 0),
+            'category_scores': category_scores,
+            'created_at': datetime.utcnow().isoformat(),
+        }
+        cv_versions_collection.insert_one(version_doc)
 
     # Track gamification for CV upload
     check_and_award_badges(g.user_id, cv_score=analysis.get('percentage'))

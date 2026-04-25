@@ -78,7 +78,6 @@ function CVUploadSection({ isDark, onCVUploaded, cvData }: { isDark: boolean; on
       if (!res.ok) throw new Error('Upload failed')
       const result = await res.json()
       if (result.success) {
-        sessionStorage.setItem('cvData', JSON.stringify(result.data))
         onCVUploaded(result.data)
         setUploaded(true)
         setFileName(result.data.filename || acceptedFiles[0].name)
@@ -437,6 +436,223 @@ function JobMatchesSection({ isDark, cvData }: { isDark: boolean; cvData: any | 
           </p>
         </div>
       )}
+    </motion.div>
+  )
+}
+
+// ── CV Analysis Summary ─────────────────────────────────────────────────────
+function CVAnalysisSummary({ isDark, cvData }: { isDark: boolean; cvData: any | null }) {
+  const suggestions = cvData?.analysis?.suggestions || []
+  const mistakes = cvData?.analysis?.mistakes || []
+  const atsGrade = cvData?.ai_analysis?.ats_score?.grade
+  const atsIssues = cvData?.ai_analysis?.ats_score?.format_issues || []
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.2 }}
+      className={`rounded-2xl p-6 border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-lg'}`}
+    >
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>CV Analysis Summary</h3>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            {cvData ? 'Key insights from your CV' : 'Upload a CV to see analysis'}
+          </p>
+        </div>
+        {atsGrade && (
+          <div className={`px-3 py-1.5 rounded-full text-sm font-bold
+            ${atsGrade === 'A' ? 'bg-emerald-100 text-emerald-700' :
+              atsGrade === 'B' ? 'bg-sky-100 text-sky-700' :
+              atsGrade === 'C' ? 'bg-amber-100 text-amber-700' :
+              'bg-rose-100 text-rose-700'}`}>
+            ATS Grade: {atsGrade}
+          </div>
+        )}
+      </div>
+
+      {!cvData ? (
+        <div className={`text-center py-8 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Upload your CV to see personalized analysis and suggestions
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Suggestions */}
+          {suggestions.length > 0 && suggestions[0] !== 'Great job! Your CV looks professional' && (
+            <div>
+              <h4 className={`font-medium mb-2 flex items-center gap-2 ${isDark ? 'text-sky-400' : 'text-sky-600'}`}>
+                <CheckCircleIcon className="h-4 w-4" /> Improvement Suggestions
+              </h4>
+              <ul className={`space-y-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                {suggestions.slice(0, 3).map((suggestion: string, idx: number) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <span className="text-sky-500 mt-0.5">•</span>
+                    <span>{suggestion}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* ATS Format Issues */}
+          {atsIssues.length > 0 && (
+            <div>
+              <h4 className={`font-medium mb-2 flex items-center gap-2 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+                <DocumentTextIcon className="h-4 w-4" /> ATS Format Issues
+              </h4>
+              <ul className={`space-y-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                {atsIssues.slice(0, 2).map((issue: string, idx: number) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <span className="text-amber-500 mt-0.5">•</span>
+                    <span>{issue}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Mistakes */}
+          {mistakes.length > 0 && mistakes[0] !== 'No major issues found' && (
+            <div>
+              <h4 className={`font-medium mb-2 flex items-center gap-2 ${isDark ? 'text-rose-400' : 'text-rose-600'}`}>
+                <XMarkIcon className="h-4 w-4" /> Issues Found
+              </h4>
+              <ul className={`space-y-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                {mistakes.slice(0, 2).map((mistake: string, idx: number) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <span className="text-rose-500 mt-0.5">•</span>
+                    <span>{mistake}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {(suggestions.length === 0 || suggestions[0] === 'Great job! Your CV looks professional') &&
+           mistakes.length === 0 || mistakes[0] === 'No major issues found' ? (
+            <div className={`p-4 rounded-xl text-center ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'}`}>
+              <CheckCircleIcon className={`h-8 w-8 mx-auto mb-2 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+              <p className={`text-sm font-medium ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                Your CV looks great! No major issues found.
+              </p>
+            </div>
+          ) : null}
+
+          <a href="/cv-result/analysis" className={`w-full py-3 rounded-xl font-medium transition-colors block text-center
+            ${isDark ? 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20' : 'bg-sky-50 text-sky-600 hover:bg-sky-100'}`}>
+            View Full Analysis →
+          </a>
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+// ── Recent Activity Section ─────────────────────────────────────────────────
+function RecentActivitySection({ isDark, cvData }: { isDark: boolean; cvData: any | null }) {
+  const [activities, setActivities] = useState<any[]>([])
+
+  useEffect(() => {
+    // Build activity list from available data
+    const acts: any[] = []
+
+    if (cvData?.created_at) {
+      acts.push({
+        type: 'cv_upload',
+        title: 'CV Uploaded',
+        description: `Filename: ${cvData.filename || 'Unknown'}`,
+        date: cvData.created_at,
+        icon: DocumentTextIcon,
+        color: 'sky'
+      })
+    }
+
+    // Sort by date (newest first)
+    acts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    setActivities(acts)
+  }, [cvData])
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.3 }}
+      className={`rounded-2xl p-6 border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-lg'}`}
+    >
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Recent Activity</h3>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Your latest actions
+          </p>
+        </div>
+        <div className={`p-2 rounded-lg ${isDark ? 'bg-sky-500/20' : 'bg-sky-50'}`}>
+          <ClockIcon className="h-5 w-5 text-sky-500" />
+        </div>
+      </div>
+
+      {activities.length === 0 ? (
+        <div className={`text-center py-8 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            No recent activity yet
+          </p>
+          <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            Upload a CV to get started
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {activities.map((activity, index) => (
+            <div
+              key={index}
+              className={`flex items-start gap-3 p-3 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}
+            >
+              <div className={`p-2 rounded-lg flex-shrink-0
+                ${activity.color === 'sky' ? (isDark ? 'bg-sky-500/20' : 'bg-sky-100') :
+                  activity.color === 'emerald' ? (isDark ? 'bg-emerald-500/20' : 'bg-emerald-100') :
+                  (isDark ? 'bg-amber-500/20' : 'bg-amber-100')}`}>
+                <activity.icon className={`h-4 w-4
+                  ${activity.color === 'sky' ? 'text-sky-500' :
+                    activity.color === 'emerald' ? 'text-emerald-500' :
+                    'text-amber-500'}`} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`font-medium text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  {activity.title}
+                </p>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {activity.description}
+                </p>
+                <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  {new Date(activity.date).toLocaleDateString()} at {new Date(activity.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+        <div className="grid grid-cols-2 gap-3">
+          <a
+            href="/candidate/cv-versions"
+            className={`text-center py-2 px-3 rounded-lg text-sm font-medium transition-colors
+              ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+          >
+            View All Versions
+          </a>
+          <a
+            href="/candidate/applications"
+            className={`text-center py-2 px-3 rounded-lg text-sm font-medium transition-colors
+              ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+          >
+            Job Applications
+          </a>
+        </div>
+      </div>
     </motion.div>
   )
 }
@@ -883,7 +1099,6 @@ function CVHistorySection({ isDark }: { isDark: boolean }) {
   const loadVersion = (version: any) => {
     setSelectedVersion(version)
     if (version.cv_data) {
-      sessionStorage.setItem('cvData', JSON.stringify(version.cv_data))
       window.location.href = '/cv-result'
     }
   }
@@ -994,25 +1209,15 @@ export default function CandidateDashboard() {
   const [cvData, setCvData] = useState<any | null>(null)
   const [cvDataLoaded, setCvDataLoaded] = useState(false)
 
-  // Fetch latest CV from backend on mount (in case sessionStorage is empty after refresh)
+  // Fetch latest CV from backend on mount (always fetch fresh, no caching)
   useEffect(() => {
     const fetchLatestCV = async () => {
-      // First try sessionStorage
-      const stored = sessionStorage.getItem('cvData')
-      if (stored) {
-        setCvData(JSON.parse(stored))
-        setCvDataLoaded(true)
-        return
-      }
-      
-      // Then fetch from DB
       try {
         const res = await fetchWithAuth('/api/cv-data/latest')
         if (res.ok) {
           const data = await res.json()
           if (data.success && data.cv_data) {
             setCvData(data.cv_data)
-            sessionStorage.setItem('cvData', JSON.stringify(data.cv_data))
           }
         }
       } catch (error) {
@@ -1160,17 +1365,15 @@ export default function CandidateDashboard() {
                 </div>
               )}
 
-              {/* Dashboard Grid */}
-              <div className="grid lg:grid-cols-3 gap-6">
+              {/* Dashboard Grid - Improved Overview */}
+              <div className="grid lg:grid-cols-2 gap-6">
                 <div className="space-y-6">
                   <CVUploadSection isDark={isDark} onCVUploaded={handleCVUploaded} cvData={cvData} />
                   <ATSScoreSection isDark={isDark} cvData={cvData} />
                 </div>
-                <div className="lg:col-span-1">
-                  <JobMatchesSection isDark={isDark} cvData={cvData} />
-                </div>
-                <div className="lg:col-span-1">
-                  <CareerRoadmapSection isDark={isDark} cvData={cvData} />
+                <div className="space-y-6">
+                  <CVAnalysisSummary isDark={isDark} cvData={cvData} />
+                  <RecentActivitySection isDark={isDark} cvData={cvData} />
                 </div>
               </div>
 

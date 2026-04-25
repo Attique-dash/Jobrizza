@@ -103,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Clear Flask token from localStorage
     if (typeof window !== 'undefined') {
       localStorage.removeItem('token')
+      sessionStorage.removeItem('cvData')
     }
     signOut({ callbackUrl: '/' })
   }

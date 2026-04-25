@@ -282,7 +282,6 @@ export default function LandingPage() {
       if (!res.ok) throw new Error('Upload failed')
       const result = await res.json()
       if (result.success) {
-        sessionStorage.setItem('cvData', JSON.stringify(result.data))
         router.push('/cv-result')
       }
     } catch (err) {

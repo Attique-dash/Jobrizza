@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from './Authcontext'
+import { fetchWithAuth } from '@/lib/api'
 
 interface CVData {
   filename: string
@@ -36,21 +37,27 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
   const [cvData, setCvData] = useState<CVData | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const loadCVData = () => {
+  const loadCVData = async () => {
     if (typeof window === 'undefined') return
     
-    const stored = sessionStorage.getItem('cvData')
-    if (stored) {
-      try {
-        setCvData(JSON.parse(stored))
-      } catch (e) {
-        console.error('Failed to parse CV data:', e)
+    try {
+      const res = await fetchWithAuth('/api/cv-data/latest')
+      if (res.ok) {
+        const data = await res.json()
+        if (data.success && data.cv_data) {
+          setCvData(data.cv_data)
+        } else {
+          setCvData(null)
+        }
+      } else {
         setCvData(null)
       }
-    } else {
+    } catch (error) {
+      console.error('Failed to fetch CV data:', error)
       setCvData(null)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => {

@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { fetchWithAuth } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CVData {
@@ -61,9 +62,24 @@ export default function CVResultPage() {
 
   useEffect(() => {
     if (!isAuthenticated) { router.push('/auth/login?redirect=/cv-result'); return }
-    const stored = sessionStorage.getItem('cvData')
-    if (stored) setCvData(JSON.parse(stored))
-    setLoading(false)
+
+    const fetchCVData = async () => {
+      try {
+        const res = await fetchWithAuth('/api/cv-data/latest')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.success && data.cv_data) {
+            setCvData(data.cv_data)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch CV data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchCVData()
   }, [isAuthenticated, router])
 
   if (loading) return (
