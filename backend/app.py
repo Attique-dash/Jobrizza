@@ -283,17 +283,38 @@ def require_auth(f):
 
 # ── File extraction ───────────────────────────────────────────────────────────
 def extract_text_from_pdf(filepath: str) -> str:
+    """
+    Extract text from PDF files.
+
+    NOTE: This function extracts text from text-based PDFs. Image-based PDFs
+    (scanned documents, photos exported as PDF) require OCR (Optical Character
+    Recognition) which is not currently supported. If you upload a scanned CV
+    image saved as PDF, the text extraction may return empty or poor results.
+    """
     if PyPDF2 is None:
         return "PDF extraction not available – install PyPDF2"
-    text = ""
+    text_parts = []
     try:
         with open(filepath, 'rb') as f:
             reader = PyPDF2.PdfReader(f)
-            for page in reader.pages:
-                text += page.extract_text() or ""
+            for page_num, page in enumerate(reader.pages):
+                page_text = page.extract_text() or ""
+                if page_text:
+                    # Clean up common PDF extraction issues
+                    # Fix multi-column layouts by ensuring proper line breaks
+                    lines = page_text.split('\n')
+                    cleaned_lines = []
+                    for line in lines:
+                        line = line.strip()
+                        # Skip page numbers and headers/footers
+                        if line and not re.match(r'^\d+$', line):  # Skip standalone numbers (page numbers)
+                            # Skip common header/footer patterns
+                            if not re.match(r'^(page|cv|resume|curriculum vitae|\d+\s+of\s+\d+)', line.lower()):
+                                cleaned_lines.append(line)
+                    text_parts.append('\n'.join(cleaned_lines))
     except Exception as e:
         return f"Error reading PDF: {e}"
-    return text
+    return '\n\n'.join(text_parts)
 
 
 def extract_text_from_docx(filepath: str) -> str:
@@ -326,43 +347,384 @@ def parse_cv_data(text: str, filename: str) -> Dict:
             data['phone'] = m.group(0).strip()
             break
 
-    common_skills = [
-        'python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'go', 'rust',
-        'react', 'angular', 'vue', 'next.js', 'node.js', 'django', 'flask', 'fastapi',
-        'spring', 'express', 'sql', 'mysql', 'postgresql', 'mongodb', 'redis',
-        'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'git', 'ci/cd', 'agile', 'scrum',
-        'machine learning', 'deep learning', 'tensorflow', 'pytorch', 'data analysis',
-        'tableau', 'power bi', 'excel', 'pandas', 'numpy', 'scikit-learn', 'rest api',
-        'graphql', 'microservices', 'project management', 'leadership', 'communication',
-        'problem solving', 'teamwork', 'devops', 'linux', 'figma', 'photoshop',
+    # Comprehensive skills database organized by category
+    technical_skills = [
+        # Programming Languages
+        'python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'go', 'golang', 'rust', 'ruby', 'php', 'swift',
+        'kotlin', 'scala', 'perl', 'r', 'matlab', 'bash', 'shell', 'powershell', 'html', 'css', 'sass', 'less',
+        'sql', 'pl/sql', 't-sql', 'nosql', 'graphql', 'json', 'xml', 'yaml',
+        # Frontend Frameworks/Libraries
+        'react', 'react.js', 'angular', 'angularjs', 'vue', 'vue.js', 'next.js', 'nuxt.js', 'svelte',
+        'jquery', 'bootstrap', 'tailwind', 'material-ui', 'antd', 'redux', 'zustand', 'mobx',
+        # Backend Frameworks
+        'node.js', 'nodejs', 'express', 'express.js', 'django', 'flask', 'fastapi', 'spring', 'spring boot',
+        'laravel', 'symfony', 'codeigniter', 'asp.net', '.net', 'rails', 'ruby on rails',
+        # Databases
+        'mysql', 'postgresql', 'postgres', 'mongodb', 'sqlite', 'redis', 'elasticsearch', 'cassandra',
+        'dynamodb', 'firebase', 'oracle', 'db2', 'couchdb', 'neo4j', 'mariadb',
+        # Cloud & DevOps
+        'aws', 'amazon web services', 'azure', 'microsoft azure', 'gcp', 'google cloud', 'heroku', 'vercel',
+        'netlify', 'digitalocean', 'docker', 'kubernetes', 'k8s', 'jenkins', 'github actions', 'gitlab ci',
+        'circleci', 'travis ci', 'terraform', 'ansible', 'puppet', 'chef', 'vagrant', 'nginx', 'apache',
+        'ci/cd', 'cicd', 'devops', 'sre', 'site reliability', 'infrastructure as code', 'iac',
+        # Data Science & ML
+        'machine learning', 'deep learning', 'tensorflow', 'pytorch', 'keras', 'scikit-learn', 'sklearn',
+        'pandas', 'numpy', 'scipy', 'matplotlib', 'seaborn', 'plotly', 'd3.js', 'jupyter', 'rstudio',
+        'data analysis', 'data science', 'big data', 'hadoop', 'spark', 'kafka', 'airflow', 'dbt',
+        'computer vision', 'nlp', 'natural language processing', 'ai', 'artificial intelligence',
+        # Tools & Platforms
+        'git', 'github', 'gitlab', 'bitbucket', 'jira', 'confluence', 'trello', 'asana', 'notion',
+        'slack', 'teams', 'zoom', 'figma', 'sketch', 'adobe xd', 'photoshop', 'illustrator',
+        'tableau', 'power bi', 'looker', 'qlik', 'excel', 'google sheets', 'sap', 'salesforce',
+        'wordpress', 'shopify', 'magento', 'drupal', 'joomla',
+        # Testing & QA
+        'selenium', 'cypress', 'playwright', 'jest', 'mocha', 'junit', 'pytest', 'cucumber',
+        'postman', 'api testing', 'unit testing', 'integration testing', 'e2e testing',
+        'automation testing', 'manual testing', 'qa', 'quality assurance', 'load testing',
+        # Methodologies & Practices
+        'agile', 'scrum', 'kanban', 'lean', 'xp', 'extreme programming', 'tdd', 'test driven development',
+        'bdd', 'behavior driven development', 'ddd', 'domain driven design', 'microservices',
+        'serverless', 'event-driven', 'rest api', 'soap', 'api design', 'openapi', 'swagger',
+        'oauth', 'jwt', 'authentication', 'authorization', 'security', 'encryption',
+        # Operating Systems
+        'linux', 'ubuntu', 'centos', 'debian', 'red hat', 'windows', 'macos', 'ios', 'android',
+        'unix', 'shell scripting', 'command line', 'cli',
     ]
-    text_lower = text.lower()
-    data['skills'] = [s for s in common_skills if s in text_lower]
 
-    lines = text.split('\n')[:10]
-    for line in lines:
+    soft_skills = [
+        'leadership', 'team leadership', 'people management', 'mentoring', 'coaching',
+        'communication', 'written communication', 'verbal communication', 'presentation skills',
+        'public speaking', 'interpersonal skills', 'emotional intelligence', 'eq',
+        'teamwork', 'collaboration', 'cross-functional collaboration', 'team building',
+        'problem solving', 'critical thinking', 'analytical thinking', 'creative thinking',
+        'decision making', 'strategic thinking', 'planning', 'organization', 'time management',
+        'adaptability', 'flexibility', 'resilience', 'stress management',
+        'negotiation', 'conflict resolution', 'stakeholder management', 'client management',
+        'customer service', 'relationship building', 'networking',
+        'project management', 'program management', 'product management', 'risk management',
+        'change management', 'process improvement', 'workflow optimization',
+        'attention to detail', 'multitasking', 'prioritization', 'deadline management',
+        'self-motivated', 'proactive', 'initiative', 'ownership', 'accountability',
+    ]
+
+    business_skills = [
+        'marketing', 'digital marketing', 'seo', 'sem', 'content marketing', 'social media',
+        'sales', 'business development', 'account management', 'crm',
+        'finance', 'financial analysis', 'financial reporting', 'financial modeling', 'financial management',
+        'accounting', 'budgeting', 'forecasting', 'cost analysis', 'variance analysis',
+        'strategic planning', 'strategic analysis', 'business strategy', 'corporate strategy',
+        'trend analysis', 'market analysis', 'market assessment', 'market research',
+        'competitive analysis', 'competitive intelligence', 'industry analysis',
+        'risk analysis', 'risk assessment', 'risk management', 'credit analysis',
+        'investment analysis', 'portfolio analysis', 'equity research',
+        'hr', 'human resources', 'recruiting', 'talent acquisition', 'onboarding',
+        'operations', 'supply chain', 'logistics', 'procurement', 'vendor management',
+        'consulting', 'strategy', 'business analysis', 'business intelligence',
+        'product development', 'ux research', 'user research', 'customer research',
+        'data analysis', 'statistical analysis', 'quantitative analysis', 'qualitative analysis',
+    ]
+
+    languages = [
+        'english', 'spanish', 'french', 'german', 'chinese', 'mandarin', 'cantonese',
+        'japanese', 'korean', 'arabic', 'hindi', 'portuguese', 'russian', 'italian',
+        'dutch', 'turkish', 'polish', 'urdu', 'bengali', 'punjabi',
+    ]
+
+    all_skills = technical_skills + soft_skills + business_skills + languages
+
+    text_lower = text.lower()
+
+    # Extract skills with better matching (handle word boundaries)
+    detected_skills = []
+    for skill in all_skills:
+        # Match whole words or common variations
+        skill_pattern = r'\b' + re.escape(skill) + r'\b'
+        if re.search(skill_pattern, text_lower):
+            detected_skills.append(skill)
+
+    # Remove duplicates while preserving order
+    data['skills'] = list(dict.fromkeys(detected_skills))
+
+    # Enhanced Name Extraction - IMPROVED
+    lines = text.split('\n')[:25]  # Check first 25 lines
+
+    # PASS 1: Look for clean names (not merged with other text)
+    for i, line in enumerate(lines):
         line = line.strip()
-        if line and 2 < len(line) < 50 and not re.match(r'^[\d\W]', line) and 'email' not in line.lower():
-            if 'name' in line.lower() and ':' in line:
-                data['name'] = line.split(':')[1].strip()
-            elif not data['name'] and line[0].isupper():
-                data['name'] = line
+        if not line or len(line) > 60 or re.match(r'^[\d\W]+$', line):
+            continue
+
+        line_lower = line.lower()
+        section_headers = [
+            'professional summary', 'technical skills', 'work experience', 'education', 'university',
+            'experience', 'summary', 'skills', 'frontend', 'backend', 'development',
+            'database', 'version control', 'bachelor', 'master', 'intermediate',
+            'web developer', 'software engineer', 'full stack', 'frontend developer', 'backend developer'
+        ]
+        if any(header in line_lower for header in section_headers):
+            continue
+
+        # Look for "Name:" label
+        if 'name' in line_lower and ':' in line:
+            name_part = line.split(':', 1)[1].strip()
+            if name_part and len(name_part) > 2:
+                data['name'] = name_part
+                break
+
+        # Match Title Case names like "John Smith", "John A. Smith"
+        name_pattern = r'^([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)$'
+        match = re.match(name_pattern, line)
+        if match:
+            data['name'] = match.group(1)
             break
 
-    edu_kw = ['bachelor', 'master', 'phd', 'b.s.', 'm.s.', 'degree', 'university', 'college', 'school', 'b.tech', 'm.tech']
-    for kw in edu_kw:
-        if kw in text_lower:
-            for sentence in re.split(r'[.\n]', text):
-                if kw in sentence.lower() and len(sentence.strip()) > 10:
-                    data['education'].append(sentence.strip()[:150])
+        # Match ALL CAPS names like "JAMES MILLER", "JOHN A. SMITH"
+        all_caps_pattern = r'^([A-Z]{2,}(?:\s+[A-Z]\.?)?\s+[A-Z]{2,}(?:\s+[A-Z]{2,})?)$'
+        all_caps_match = re.match(all_caps_pattern, line)
+        if all_caps_match:
+            name_parts = line.split()
+            data['name'] = ' '.join(p.title() for p in name_parts)
+            break
+    # PASS 2: Look for names merged with section headers (e.g., "EXPERIENCEUMARSHAFEEQ")
+    if not data['name']:
+        for line in lines:
+            line_clean = line.strip().upper()
+            line_no_spaces = line_clean.replace(' ', '')
+
+            merged_headers = ['WORKEXPERIENCE', 'EXPERIENCE', 'PROFESSIONALEXPERIENCE',
+                            'PROFILE', 'ABOUTME', 'CONTACT', 'SUMMARY']
+
+            for header in merged_headers:
+                if header in line_no_spaces:
+                    header_idx = line_no_spaces.find(header)
+                    after_header = line_no_spaces[header_idx + len(header):].strip()
+                    if after_header and 3 < len(after_header) < 40:
+                        if after_header.isalpha():
+                            data['name'] = after_header.title()
+                            break
+            if data['name']:
+                break
+
+    # PASS 2b: Alternative pattern - look for "Job Title Name" pattern in first few lines
+    if not data['name']:
+        for line in lines[:15]:
+            line_clean = line.strip()
+            # Skip lines that are clearly job titles without names
+            job_title_only = ['web developer', 'software engineer', 'full stack', 'frontend developer', 'backend developer', 'financial analyst']
+            line_lower = line_clean.lower()
+
+            # Look for pattern: Job Title + Name (e.g., "Web Developer Umar Shafeeq")
+            # Name comes after job title
+            for title in job_title_only:
+                if title in line_lower:
+                    # Get text after the job title
+                    title_idx = line_lower.find(title)
+                    after_title = line_clean[title_idx + len(title):].strip()
+                    if after_title:
+                        # Check if what follows looks like a name (2-4 capitalized words)
+                        words = after_title.split()
+                        if 1 <= len(words) <= 4 and all(w[0].isupper() for w in words if w):
+                            data['name'] = after_title
+                            break
+            if data['name']:
+                break
+
+    # PASS 3: Fallback - any 2-4 capitalized words in first few lines
+    if not data['name']:
+        for line in lines[:10]:
+            words = line.strip().split()
+            if 2 <= len(words) <= 4:
+                # Check if all words start with capital letters and are not common words
+                common_words = ['the', 'and', 'for', 'with', 'from', 'this', 'that', 'web', 'full', 'stack', 'software']
+                if all(w[0].isupper() for w in words if w):
+                    if not any(w.lower() in common_words for w in words):
+                        data['name'] = line.strip()
+                        break
+
+    # FINAL VALIDATION: Ensure extracted name is not a section header or common non-name
+    if data['name']:
+        name_lower = data['name'].lower()
+        invalid_names = [
+            'professional summary', 'summary', 'objective', 'experience', 'work experience',
+            'technical skills', 'skills', 'education', 'projects', 'certifications',
+            'contact', 'profile', 'about', 'web developer', 'software engineer',
+            'full stack', 'frontend developer', 'backend developer', 'superior university',
+            'university', 'college', 'curriculum vitae', 'resume', 'references'
+        ]
+        if any(inv in name_lower for inv in invalid_names):
+            data['name'] = None  # Reset invalid name
+
+    # Enhanced Education Extraction
+    education_keywords = [
+        'bachelor', 'master', 'phd', 'doctorate', 'b.s.', 'm.s.', 'b.a.', 'm.a.', 'm.b.a.', 'mba',
+        'b.tech', 'm.tech', 'be', 'me', 'b.sc', 'm.sc', 'b.com', 'm.com', 'b.e.', 'm.e.',
+        'degree', 'university', 'college', 'institute', 'school', 'academy', 'polytechnic',
+        'intermediate', 'ics', 'fsc', 'ssc', 'hsc', 'fa', 'fs.c', 'i.com', 'i.cs'
+    ]
+
+    # Look for education section and extract entries
+    edu_section_found = False
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        line_lower = line.lower().strip()
+        # Detect education section header
+        if any(kw in line_lower for kw in ['education', 'academic', 'qualification', 'degree']):
+            edu_section_found = True
+            continue
+
+        if edu_section_found:
+            # Stop at next major section
+            if any(kw in line_lower for kw in ['experience', 'work', 'skills', 'projects', 'certifications', 'references', 'interests']) and i > 0:
+                break
+
+            # Extract education entries
+            if any(kw in line_lower for kw in education_keywords):
+                # Get context (this line + next 1-2 lines)
+                context = line.strip()
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    if next_line and len(next_line) < 200:
+                        context += ' | ' + next_line
+                if len(context) > 15:
+                    data['education'].append(context[:200])
+
+    # Also do general keyword search as fallback
+    if not data['education']:
+        # Check for intermediate/secondary education - look in merged text
+        intermediate_keywords = ['intermediate', 'ics', 'fsc', 'ssc', 'hsc', 'fa', 'i.com', 'i.cs']
+        for kw in intermediate_keywords:
+            if kw in text_lower:
+                # Find the keyword position and extract surrounding context
+                idx = text_lower.find(kw)
+                if idx >= 0:
+                    # Extract 100 chars before and after the keyword
+                    start = max(0, idx - 100)
+                    end = min(len(text), idx + 100)
+                    context = text[start:end]
+
+                    # Clean up the context
+                    context = context.replace('\n', ' ')
+                    # Remove common noise words/patterns
+                    noise_patterns = [
+                        r'work experience\w*', r'web developer', r'email\s*:', r'phone\s*:',
+                        r'\+?\d[\d\s\-\(\)]{7,20}', r'\S+@\S+\.\S+', r'umers?hafeeq'
+                    ]
+                    for pattern in noise_patterns:
+                        context = re.sub(pattern, '', context, flags=re.IGNORECASE)
+
+                    context = re.sub(r'\s+', ' ', context).strip()
+                    if len(context) > 15 and len(context) < 200:
+                        data['education'].append(context)
+                    if len(data['education']) >= 3:
+                        break
+                if len(data['education']) >= 3:
                     break
 
-    for kw in ['experience', 'worked at', 'employed', 'position', 'role', 'company']:
-        if kw in text_lower:
-            for sentence in re.split(r'[.\n]', text)[:20]:
-                if kw in sentence.lower() and len(sentence.strip()) > 20:
-                    data['experience'].append(sentence.strip()[:150])
-                    break
+        # Standard university/college education search
+        if not data['education']:
+            for kw in education_keywords[:5]:  # Check main keywords
+                if kw in text_lower:
+                    for sentence in re.split(r'[.\n]', text):
+                        sent_lower = sentence.lower()
+                        if kw in sent_lower and len(sentence.strip()) > 15:
+                            # Check if it looks like education
+                            if any(x in sent_lower for x in ['university', 'college', 'institute', 'degree', 'school']):
+                                data['education'].append(sentence.strip()[:200])
+                                if len(data['education']) >= 3:
+                                    break
+                    if len(data['education']) >= 3:
+                        break
+
+    # Enhanced Experience Extraction - IMPROVED
+    company_indicators = ['inc', 'llc', 'ltd', 'limited', 'corp', 'corporation', 'company', 'co.', 'gmbh', 'ag', 'bv', 'plc', 'solutions', 'technologies', 'systems', 'group', 'services']
+    job_title_keywords = ['engineer', 'manager', 'developer', 'analyst', 'consultant', 'director', 'lead', 'senior', 'junior', 'head', 'chief', 'vp', 'vice president', 'officer', 'coordinator', 'specialist', 'associate', 'assistant', 'designer', 'architect', 'administrator', 'intern', 'trainee', 'supervisor', 'executive', 'representative', 'strategist', 'coordinator', 'freelance', 'contractor']
+
+    # Method 1: Section-based extraction
+    exp_section_found = False
+    exp_section_keywords = ['experience', 'work', 'employment', 'career', 'professional background', 'work history']
+    stop_keywords = ['education', 'skills', 'projects', 'certifications', 'references', 'interests', 'languages', 'awards', 'publications']
+
+    for i, line in enumerate(lines):
+        line_lower = line.lower().strip()
+
+        # Detect experience section header (more flexible matching)
+        if any(kw in line_lower for kw in exp_section_keywords):
+            exp_section_found = True
+            continue
+
+        if exp_section_found:
+            # Stop at next major section
+            if any(kw in line_lower for kw in stop_keywords) and i > 0 and len(line.strip()) < 50:
+                break
+
+            # Extract experience entries - look for job titles, companies, dates, bullet points
+            line_stripped = line.strip()
+            if 10 < len(line_stripped) < 200:
+                # Check for date patterns (strong indicator of experience entry)
+                date_patterns = [
+                    r'\b(19|20)\d{2}\b',  # Years 1900-2099
+                    r'\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\.\s]+\d{4}\b',
+                    r'\b\d{1,2}[\/\-]\d{4}\b',
+                    r'\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b',
+                    r'\b(present|current|now|today|ongoing)\b',
+                ]
+                has_date = any(re.search(p, line_lower) for p in date_patterns)
+
+                # Check for company indicators
+                has_company = any(ind in line_lower for ind in company_indicators)
+
+                # Check for job titles
+                has_title = any(kw in line_lower for kw in job_title_keywords)
+
+                # Check for bullet points (common in experience descriptions)
+                has_bullet = line_stripped.startswith(('•', '-', '*', '→', '▪', '■'))
+
+                # Check for location patterns
+                has_location = re.search(r'\b[A-Z][a-z]+,\s*[A-Z]{2,}\b|\b[A-Z][a-z]+,\s*[A-Z][a-z]+\b', line)
+
+                # Accept if it has any strong indicator
+                if has_date or has_company or (has_title and len(line_stripped) < 120) or (has_bullet and len(line_stripped) > 20) or has_location:
+                    data['experience'].append(line_stripped[:200])
+                    if len(data['experience']) >= 8:
+                        break
+
+    # Method 2: Pattern-based extraction (broader search across entire text)
+    if not data['experience'] or len(data['experience']) < 2:
+        # Look for patterns like "Job Title at Company" or "Company - Job Title"
+        experience_patterns = [
+            r'([A-Z][a-zA-Z\s]+(?:Engineer|Developer|Manager|Analyst|Consultant|Designer|Architect|Director|Lead|Head|Chief|VP|Officer|Coordinator|Specialist|Associate|Assistant|Intern))\s*(?:at|@|with|for|-)\s*([A-Z][a-zA-Z\s]+)',
+            r'([A-Z][a-zA-Z\s]+(?:Inc\.?|LLC|Ltd\.?|Limited|Corp\.?|Corporation|Company|Co\.))\s*[-–]\s*([A-Z][a-zA-Z\s]+)',
+            r'([A-Z][a-zA-Z\s]+)\s*\(\s*(?:20\d{2}|19\d{2})\s*[-–]\s*(?:20\d{2}|19\d{2}|present|current)\s*\)',
+        ]
+
+        for pattern in experience_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if isinstance(match, tuple):
+                    entry = ' '.join(match).strip()
+                else:
+                    entry = match.strip()
+                if len(entry) > 15 and len(entry) < 200:
+                    data['experience'].append(entry)
+            if len(data['experience']) >= 5:
+                break
+
+    # Method 3: Sentence-based fallback
+    if not data['experience']:
+        sentences = re.split(r'[\.\n]', text)
+        for sentence in sentences:
+            sent_lower = sentence.lower().strip()
+            # Look for experience-indicating phrases
+            exp_phrases = ['worked at', 'employed at', 'position at', 'role at', 'job at', 'experience at', 'intern at', 'consultant at', 'worked with', 'employed by', 'joined', 'responsible for']
+            if any(kw in sent_lower for kw in exp_phrases):
+                if len(sentence.strip()) > 20 and len(sentence.strip()) < 200:
+                    data['experience'].append(sentence.strip()[:200])
+                    if len(data['experience']) >= 3:
+                        break
+
+    # Remove duplicates while preserving order
+    data['education'] = list(dict.fromkeys(data['education']))[:5]  # Limit to 5 entries
+    data['experience'] = list(dict.fromkeys(data['experience']))[:5]  # Limit to 5 entries
 
     return data
 
@@ -1081,6 +1443,13 @@ def upload_cv():
     cv_data = parse_cv_data(text, filename)
     analysis = analyze_cv_quality(cv_data, text)
 
+    # Check if text extraction was poor (possible image-based PDF)
+    warnings = []
+    if len(text.strip()) < 100:
+        warnings.append("PDF appears to be image-based or scanned. Text extraction failed. For best results, please upload a text-based PDF or DOCX file.")
+    elif len(text.strip()) < 500:
+        warnings.append("Limited text extracted from PDF. If this is a scanned document, please upload the original text-based file for better results.")
+
     try:
         ai_analysis = ai_full_analysis(text, cv_data)
     except Exception as e:
@@ -1091,7 +1460,7 @@ def upload_cv():
             "template_suggestion": {"current_format": "Standard", "recommended_template": "Chronological", "reasons": ["Standard format works"], "before_after_tips": ["AI analysis unavailable"]}
         }
 
-    cv_data_with_analysis = {**cv_data, 'analysis': analysis, 'ai_analysis': ai_analysis}
+    cv_data_with_analysis = {**cv_data, 'analysis': analysis, 'ai_analysis': ai_analysis, 'warnings': warnings}
 
     if hasattr(g, 'user_id'):
         cv_doc = {'user_id': g.user_id, 'created_at': datetime.utcnow().isoformat(), **cv_data_with_analysis}
