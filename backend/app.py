@@ -73,10 +73,11 @@ waitlist_collection = db['waitlist']
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me-in-production-32-chars!!')
 
-# ── Google Gemini AI (Free) ───────────────────────────────────────────────────
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+# ── Groq AI ────────────────────────────────────────────────────────────────────
+# Supports both legacy Jobrizza_AI_KEY and standard GROQ_API_KEY names.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") or os.getenv("Jobrizza_AI_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
+GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # ── JSearch API (RapidAPI) ───────────────────────────────────────────────────
 JSEARCH_API_KEY = os.getenv("JSEARCH_API_KEY", "")
@@ -84,45 +85,44 @@ JSEARCH_BASE_URL = "https://jsearch.p.rapidapi.com"
 
 
 def call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 1500) -> Optional[str]:
-    """Call Google Gemini AI (free tier). Falls back to None if unavailable."""
-    if not GOOGLE_API_KEY:
-        print("GOOGLE_API_KEY not set – AI features disabled")
+    """Call Groq Chat Completions API. Falls back to None if unavailable."""
+    if not GROQ_API_KEY:
+        print("GROQ_API_KEY/Jobrizza_AI_KEY not set – AI features disabled")
         return None
 
-    url = f"{GEMINI_BASE_URL}/models/{GEMINI_MODEL}:generateContent?key={GOOGLE_API_KEY}"
-
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+    }
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": f"{system_prompt}\n\n{user_prompt}"}
-                ]
-            }
+        "model": GROQ_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
         ],
-        "generationConfig": {
-            "maxOutputTokens": max_tokens,
-            "temperature": 0.7,
-        }
+        "temperature": 0.6,
+        "max_tokens": max_tokens,
+        "top_p": 0.95,
     }
 
     try:
-        resp = requests.post(url, json=payload, timeout=30)
+        resp = requests.post(GROQ_BASE_URL, headers=headers, json=payload, timeout=45)
         resp.raise_for_status()
         result = resp.json()
-        content = result["candidates"][0]["content"]["parts"][0]["text"]
-        print(f"Gemini response (first 200 chars): {content[:200]}...")
+        content = result["choices"][0]["message"]["content"]
+        print(f"Groq response (first 200 chars): {content[:200]}...")
         return content
     except requests.exceptions.Timeout:
-        print("Gemini API timeout")
+        print("Groq API timeout")
         return None
     except requests.exceptions.HTTPError as e:
-        print(f"Gemini HTTP Error {e.response.status_code}: {e.response.text[:200]}")
+        print(f"Groq HTTP Error {e.response.status_code}: {e.response.text[:200]}")
         return None
     except (KeyError, IndexError) as e:
-        print(f"Gemini response parsing error: {e}")
+        print(f"Groq response parsing error: {e}")
         return None
     except Exception as e:
-        print(f"Gemini error: {e}")
+        print(f"Groq error: {e}")
         return None
 
 
