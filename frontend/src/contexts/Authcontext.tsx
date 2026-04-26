@@ -16,7 +16,7 @@ interface AuthContextType {
   user: User | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
-  register: (name: string, email: string, password: string) => Promise<void>
+  register: (name: string, email: string, password: string, userType?: 'candidate' | 'recruiter') => Promise<void>
   logout: () => void
   isAuthenticated: boolean
 }
@@ -25,7 +25,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   login: async () => {},
-  register: async () => {},
+  register: async (name, email, password, userType = 'candidate') => {},
   logout: () => {},
   isAuthenticated: false,
 })
@@ -79,12 +79,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const register = async (name: string, email: string, password: string) => {
+  const register = async (name: string, email: string, password: string, userType: 'candidate' | 'recruiter' = 'candidate') => {
     // Register with Flask backend
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, user_type: userType }),
     })
 
     const data = await res.json()

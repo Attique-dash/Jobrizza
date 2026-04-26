@@ -35,7 +35,5 @@ export const config = {
     '/cv-result/:path*',
     '/dashboard/:path*',
     '/candidate/:path*',
-    '/auth/login',
-    '/auth/signup',
   ],
 } 

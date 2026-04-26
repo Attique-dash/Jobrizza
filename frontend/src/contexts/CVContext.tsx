@@ -61,6 +61,8 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+    
     if (!isAuthenticated) {
       router.push('/auth/login?redirect=/cv-result')
       return

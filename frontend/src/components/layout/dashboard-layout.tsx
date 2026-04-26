@@ -1,6 +1,6 @@
 'use client'
 
-import { Dialog, Menu, Transition } from '@headlessui/react'
+import { Dialog, Menu, Transition, TransitionChild } from '@headlessui/react'
 import {
     Bars3Icon,
     BellIcon,
@@ -56,9 +56,9 @@ export default function DashboardLayout({
 
     return (
         <div>
-            <Transition.Root show={sidebarOpen} as={Fragment}>
+            <Transition show={sidebarOpen} as={Fragment}>
                 <Dialog as="div" className="relative z-50 lg:hidden" onClose={setSidebarOpen}>
-                    <Transition.Child
+                    <TransitionChild
                         as={Fragment}
                         enter="transition-opacity ease-linear duration-300"
                         enterFrom="opacity-0"
@@ -68,10 +68,10 @@ export default function DashboardLayout({
                         leaveTo="opacity-0"
                     >
                         <div className="fixed inset-0 bg-gray-900/80" />
-                    </Transition.Child>
+                    </TransitionChild>
 
                     <div className="fixed inset-0 flex">
-                        <Transition.Child
+                        <TransitionChild
                             as={Fragment}
                             enter="transition ease-in-out duration-300 transform"
                             enterFrom="-translate-x-full"
@@ -134,10 +134,10 @@ export default function DashboardLayout({
                                     </nav>
                                 </div>
                             </Dialog.Panel>
-                        </Transition.Child>
+                        </TransitionChild>
                     </div>
                 </Dialog>
-            </Transition.Root>
+            </Transition>
 
             {/* Static sidebar for desktop */}
             <div className="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">

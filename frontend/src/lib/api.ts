@@ -15,9 +15,14 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
   const token = getAuthToken();
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
   };
+
+  // Only set Content-Type for JSON requests, not FormData
+  const isFormData = options.body instanceof FormData;
+  if (!isFormData && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
