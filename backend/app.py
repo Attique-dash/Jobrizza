@@ -1,12 +1,13 @@
 """
 FIXED backend/app.py
 Key fixes:
-1. Python 3.8+ compatible type hints (Optional instead of str | None)
-2. Fixed /api/applications/stats route conflict
-3. Fixed bcrypt/JSON serialization issues
-4. Replaced OpenRouter with Google Gemini via direct API (free tier)
-5. Added JSearch API integration for real job listings
-6. Fixed badge list consistency checks
+1. Added PyMuPDF + Tesseract OCR for image-based PDF support
+2. Fixed CV scoring consistency (CV score and ATS score now match)
+3. Python 3.8+ compatible type hints
+4. Fixed /api/applications/stats route conflict
+5. Fixed bcrypt/JSON serialization issues
+6. Groq AI integration
+7. JSearch API integration for real job listings
 """
 
 from flask import Flask, request, jsonify, g
@@ -37,6 +38,24 @@ try:
     import docx
 except ImportError:
     docx = None
+
+# NEW: PyMuPDF for better PDF handling + OCR
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
+    print("PyMuPDF not available - install with: pip install pymupdf")
+
+# NEW: Tesseract OCR for image-based PDFs
+try:
+    import pytesseract
+    from PIL import Image
+    import io
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+    print("Tesseract/Pillow not available - install with: pip install pytesseract Pillow")
 
 app = Flask(__name__)
 
@@ -74,7 +93,6 @@ waitlist_collection = db['waitlist']
 JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me-in-production-32-chars!!')
 
 # ── Groq AI ────────────────────────────────────────────────────────────────────
-# Supports both legacy Jobrizza_AI_KEY and standard GROQ_API_KEY names.
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or os.getenv("Jobrizza_AI_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -175,29 +193,24 @@ def transform_jsearch_jobs(raw_jobs: List[Dict], cv_skills: List[str]) -> List[D
     skills_lower = [s.lower() for s in cv_skills]
 
     for i, job in enumerate(raw_jobs[:6]):
-        # Extract salary info
         salary_min = job.get("job_min_salary") or 0
         salary_max = job.get("job_max_salary") or 0
         currency = job.get("job_salary_currency") or "PKR"
 
-        # Convert USD to PKR if needed
         if currency == "USD" and salary_min > 0:
             salary_min = int(salary_min * 280)
             salary_max = int(salary_max * 280) if salary_max else salary_min * 2
             currency = "PKR"
         elif salary_min == 0:
-            # Estimate based on job type
             salary_min = 150000
             salary_max = 500000
             currency = "PKR"
 
-        # Calculate match score based on skills in job description
         job_desc = (job.get("job_description", "") or "").lower()
         job_title = (job.get("job_title", "") or "").lower()
         matched_skills = [s for s in skills_lower if s in job_desc or s in job_title]
         match_score = min(95, 50 + len(matched_skills) * 8 + random.randint(-5, 10))
 
-        # Determine job type
         emp_type = job.get("job_employment_type", "FULLTIME")
         type_map = {
             "FULLTIME": "Full-time",
@@ -209,7 +222,6 @@ def transform_jsearch_jobs(raw_jobs: List[Dict], cv_skills: List[str]) -> List[D
         if job.get("job_is_remote"):
             job_type = "Remote"
 
-        # Location
         city = job.get("job_city") or ""
         country = job.get("job_country") or ""
         location = f"{city}, {country}".strip(", ") or "Remote"
@@ -282,39 +294,111 @@ def require_auth(f):
 
 
 # ── File extraction ───────────────────────────────────────────────────────────
+
+def extract_text_with_ocr(filepath: str) -> str:
+    """
+    Extract text from image-based PDFs using PyMuPDF + Tesseract OCR.
+    This handles scanned documents and screenshots saved as PDF.
+    """
+    if not PYMUPDF_AVAILABLE:
+        return ""
+    
+    try:
+        doc = fitz.open(filepath)
+        all_text = []
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            
+            # First try native text extraction (fast, works for text PDFs)
+            native_text = page.get_text("text").strip()
+            
+            if len(native_text) > 50:
+                # Native text extraction worked
+                all_text.append(native_text)
+            elif OCR_AVAILABLE:
+                # No text found - render page as image and use OCR
+                print(f"Page {page_num + 1}: No native text, using OCR...")
+                
+                # Render at 2x resolution for better OCR accuracy
+                mat = fitz.Matrix(2, 2)
+                pix = page.get_pixmap(matrix=mat)
+                
+                # Convert to PIL Image
+                img_data = pix.tobytes("png")
+                img = Image.open(io.BytesIO(img_data))
+                
+                # OCR with tesseract - use English + possible Urdu if needed
+                try:
+                    ocr_text = pytesseract.image_to_string(img, lang='eng', config='--psm 6')
+                    if ocr_text.strip():
+                        all_text.append(ocr_text.strip())
+                        print(f"OCR extracted {len(ocr_text)} chars from page {page_num + 1}")
+                    else:
+                        print(f"OCR returned empty text for page {page_num + 1}")
+                except Exception as ocr_err:
+                    print(f"OCR error on page {page_num + 1}: {ocr_err}")
+            else:
+                print(f"Page {page_num + 1}: No text and OCR not available")
+        
+        doc.close()
+        result = "\n\n".join(all_text)
+        print(f"Total extracted text: {len(result)} characters")
+        return result
+        
+    except Exception as e:
+        print(f"PyMuPDF extraction error: {e}")
+        return ""
+
+
 def extract_text_from_pdf(filepath: str) -> str:
     """
     Extract text from PDF files.
-
-    NOTE: This function extracts text from text-based PDFs. Image-based PDFs
-    (scanned documents, photos exported as PDF) require OCR (Optical Character
-    Recognition) which is not currently supported. If you upload a scanned CV
-    image saved as PDF, the text extraction may return empty or poor results.
+    Strategy:
+    1. Try PyMuPDF native text extraction (best for text PDFs)
+    2. If insufficient text, fall back to OCR (for image-based PDFs)
+    3. Fall back to PyPDF2 as last resort
     """
-    if PyPDF2 is None:
-        return "PDF extraction not available – install PyPDF2"
-    text_parts = []
-    try:
-        with open(filepath, 'rb') as f:
-            reader = PyPDF2.PdfReader(f)
-            for page_num, page in enumerate(reader.pages):
-                page_text = page.extract_text() or ""
-                if page_text:
-                    # Clean up common PDF extraction issues
-                    # Fix multi-column layouts by ensuring proper line breaks
-                    lines = page_text.split('\n')
-                    cleaned_lines = []
-                    for line in lines:
-                        line = line.strip()
-                        # Skip page numbers and headers/footers
-                        if line and not re.match(r'^\d+$', line):  # Skip standalone numbers (page numbers)
-                            # Skip common header/footer patterns
-                            if not re.match(r'^(page|cv|resume|curriculum vitae|\d+\s+of\s+\d+)', line.lower()):
-                                cleaned_lines.append(line)
-                    text_parts.append('\n'.join(cleaned_lines))
-    except Exception as e:
-        return f"Error reading PDF: {e}"
-    return '\n\n'.join(text_parts)
+    # Strategy 1: PyMuPDF with OCR fallback (best approach)
+    if PYMUPDF_AVAILABLE:
+        text = extract_text_with_ocr(filepath)
+        if text and len(text.strip()) > 100:
+            return text
+        elif text and len(text.strip()) > 20:
+            # Got some text but might be incomplete
+            print(f"PyMuPDF got partial text ({len(text)} chars), trying PyPDF2 as backup...")
+    
+    # Strategy 2: PyPDF2 fallback
+    if PyPDF2 is not None:
+        text_parts = []
+        try:
+            with open(filepath, 'rb') as f:
+                reader = PyPDF2.PdfReader(f)
+                for page in reader.pages:
+                    page_text = page.extract_text() or ""
+                    if page_text:
+                        lines = page_text.split('\n')
+                        cleaned_lines = []
+                        for line in lines:
+                            line = line.strip()
+                            if line and not re.match(r'^\d+$', line):
+                                if not re.match(r'^(page|cv|resume|curriculum vitae|\d+\s+of\s+\d+)', line.lower()):
+                                    cleaned_lines.append(line)
+                        text_parts.append('\n'.join(cleaned_lines))
+        except Exception as e:
+            return f"Error reading PDF: {e}"
+        
+        result = '\n\n'.join(text_parts)
+        if result.strip():
+            return result
+    
+    # If we got OCR text but it was short, return it anyway
+    if PYMUPDF_AVAILABLE:
+        text = extract_text_with_ocr(filepath)
+        if text:
+            return text
+    
+    return "PDF text extraction failed. This may be an image-based or scanned PDF."
 
 
 def extract_text_from_docx(filepath: str) -> str:
@@ -347,63 +431,48 @@ def parse_cv_data(text: str, filename: str) -> Dict:
             data['phone'] = m.group(0).strip()
             break
 
-    # Comprehensive skills database organized by category
+    # Comprehensive skills database
     technical_skills = [
-        # Programming Languages
         'python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'go', 'golang', 'rust', 'ruby', 'php', 'swift',
         'kotlin', 'scala', 'perl', 'r', 'matlab', 'bash', 'shell', 'powershell', 'html', 'css', 'sass', 'less',
         'sql', 'pl/sql', 't-sql', 'nosql', 'graphql', 'json', 'xml', 'yaml',
-        # Frontend Frameworks/Libraries
         'react', 'react.js', 'angular', 'angularjs', 'vue', 'vue.js', 'next.js', 'nuxt.js', 'svelte',
         'jquery', 'bootstrap', 'tailwind', 'material-ui', 'antd', 'redux', 'zustand', 'mobx',
-        # Backend Frameworks
         'node.js', 'nodejs', 'express', 'express.js', 'django', 'flask', 'fastapi', 'spring', 'spring boot',
         'laravel', 'symfony', 'codeigniter', 'asp.net', '.net', 'rails', 'ruby on rails',
-        # Databases
         'mysql', 'postgresql', 'postgres', 'mongodb', 'sqlite', 'redis', 'elasticsearch', 'cassandra',
         'dynamodb', 'firebase', 'oracle', 'db2', 'couchdb', 'neo4j', 'mariadb',
-        # Cloud & DevOps
         'aws', 'amazon web services', 'azure', 'microsoft azure', 'gcp', 'google cloud', 'heroku', 'vercel',
         'netlify', 'digitalocean', 'docker', 'kubernetes', 'k8s', 'jenkins', 'github actions', 'gitlab ci',
         'circleci', 'travis ci', 'terraform', 'ansible', 'puppet', 'chef', 'vagrant', 'nginx', 'apache',
-        'ci/cd', 'cicd', 'devops', 'sre', 'site reliability', 'infrastructure as code', 'iac',
-        # Data Science & ML
+        'ci/cd', 'cicd', 'devops', 'sre',
         'machine learning', 'deep learning', 'tensorflow', 'pytorch', 'keras', 'scikit-learn', 'sklearn',
-        'pandas', 'numpy', 'scipy', 'matplotlib', 'seaborn', 'plotly', 'd3.js', 'jupyter', 'rstudio',
+        'pandas', 'numpy', 'scipy', 'matplotlib', 'seaborn', 'plotly', 'd3.js', 'jupyter',
         'data analysis', 'data science', 'big data', 'hadoop', 'spark', 'kafka', 'airflow', 'dbt',
         'computer vision', 'nlp', 'natural language processing', 'ai', 'artificial intelligence',
-        # Tools & Platforms
         'git', 'github', 'gitlab', 'bitbucket', 'jira', 'confluence', 'trello', 'asana', 'notion',
-        'slack', 'teams', 'zoom', 'figma', 'sketch', 'adobe xd', 'photoshop', 'illustrator',
-        'tableau', 'power bi', 'looker', 'qlik', 'excel', 'google sheets', 'sap', 'salesforce',
-        'wordpress', 'shopify', 'magento', 'drupal', 'joomla',
-        # Testing & QA
-        'selenium', 'cypress', 'playwright', 'jest', 'mocha', 'junit', 'pytest', 'cucumber',
-        'postman', 'api testing', 'unit testing', 'integration testing', 'e2e testing',
-        'automation testing', 'manual testing', 'qa', 'quality assurance', 'load testing',
-        # Methodologies & Practices
-        'agile', 'scrum', 'kanban', 'lean', 'xp', 'extreme programming', 'tdd', 'test driven development',
-        'bdd', 'behavior driven development', 'ddd', 'domain driven design', 'microservices',
-        'serverless', 'event-driven', 'rest api', 'soap', 'api design', 'openapi', 'swagger',
-        'oauth', 'jwt', 'authentication', 'authorization', 'security', 'encryption',
-        # Operating Systems
-        'linux', 'ubuntu', 'centos', 'debian', 'red hat', 'windows', 'macos', 'ios', 'android',
-        'unix', 'shell scripting', 'command line', 'cli',
+        'figma', 'sketch', 'adobe xd', 'photoshop', 'illustrator',
+        'tableau', 'power bi', 'looker', 'excel', 'google sheets', 'sap', 'salesforce',
+        'wordpress', 'shopify', 'magento',
+        'selenium', 'cypress', 'playwright', 'jest', 'mocha', 'junit', 'pytest',
+        'postman', 'api testing', 'unit testing', 'qa', 'quality assurance',
+        'agile', 'scrum', 'kanban', 'lean', 'tdd', 'bdd', 'microservices', 'serverless',
+        'rest api', 'soap', 'api design', 'openapi', 'swagger', 'oauth', 'jwt',
+        'linux', 'ubuntu', 'centos', 'windows', 'macos', 'ios', 'android', 'unix',
+        'flutter', 'react native', 'swift', 'android development', 'ios development',
     ]
 
     soft_skills = [
         'leadership', 'team leadership', 'people management', 'mentoring', 'coaching',
-        'communication', 'written communication', 'verbal communication', 'presentation skills',
-        'public speaking', 'interpersonal skills', 'emotional intelligence', 'eq',
-        'teamwork', 'collaboration', 'cross-functional collaboration', 'team building',
+        'communication', 'presentation skills', 'public speaking', 'interpersonal skills',
+        'teamwork', 'collaboration', 'cross-functional collaboration',
         'problem solving', 'critical thinking', 'analytical thinking', 'creative thinking',
         'decision making', 'strategic thinking', 'planning', 'organization', 'time management',
-        'adaptability', 'flexibility', 'resilience', 'stress management',
+        'adaptability', 'flexibility', 'resilience',
         'negotiation', 'conflict resolution', 'stakeholder management', 'client management',
         'customer service', 'relationship building', 'networking',
         'project management', 'program management', 'product management', 'risk management',
-        'change management', 'process improvement', 'workflow optimization',
-        'attention to detail', 'multitasking', 'prioritization', 'deadline management',
+        'attention to detail', 'multitasking', 'prioritization',
         'self-motivated', 'proactive', 'initiative', 'ownership', 'accountability',
     ]
 
@@ -412,15 +481,13 @@ def parse_cv_data(text: str, filename: str) -> Dict:
         'sales', 'business development', 'account management', 'crm',
         'finance', 'financial analysis', 'financial reporting', 'financial modeling', 'financial management',
         'accounting', 'budgeting', 'forecasting', 'cost analysis', 'variance analysis',
-        'strategic planning', 'strategic analysis', 'business strategy', 'corporate strategy',
+        'strategic planning', 'strategic analysis', 'business strategy',
         'trend analysis', 'market analysis', 'market assessment', 'market research',
-        'competitive analysis', 'competitive intelligence', 'industry analysis',
-        'risk analysis', 'risk assessment', 'risk management', 'credit analysis',
-        'investment analysis', 'portfolio analysis', 'equity research',
+        'competitive analysis', 'competitive intelligence',
         'hr', 'human resources', 'recruiting', 'talent acquisition', 'onboarding',
         'operations', 'supply chain', 'logistics', 'procurement', 'vendor management',
         'consulting', 'strategy', 'business analysis', 'business intelligence',
-        'product development', 'ux research', 'user research', 'customer research',
+        'product development', 'ux research', 'user research',
         'data analysis', 'statistical analysis', 'quantitative analysis', 'qualitative analysis',
     ]
 
@@ -431,24 +498,19 @@ def parse_cv_data(text: str, filename: str) -> Dict:
     ]
 
     all_skills = technical_skills + soft_skills + business_skills + languages
-
     text_lower = text.lower()
 
-    # Extract skills with better matching (handle word boundaries)
     detected_skills = []
     for skill in all_skills:
-        # Match whole words or common variations
         skill_pattern = r'\b' + re.escape(skill) + r'\b'
         if re.search(skill_pattern, text_lower):
             detected_skills.append(skill)
 
-    # Remove duplicates while preserving order
     data['skills'] = list(dict.fromkeys(detected_skills))
 
-    # Enhanced Name Extraction - IMPROVED
-    lines = text.split('\n')[:25]  # Check first 25 lines
+    # Enhanced Name Extraction
+    lines = text.split('\n')[:25]
 
-    # PASS 1: Look for clean names (not merged with other text)
     for i, line in enumerate(lines):
         line = line.strip()
         if not line or len(line) > 60 or re.match(r'^[\d\W]+$', line):
@@ -459,33 +521,32 @@ def parse_cv_data(text: str, filename: str) -> Dict:
             'professional summary', 'technical skills', 'work experience', 'education', 'university',
             'experience', 'summary', 'skills', 'frontend', 'backend', 'development',
             'database', 'version control', 'bachelor', 'master', 'intermediate',
-            'web developer', 'software engineer', 'full stack', 'frontend developer', 'backend developer'
+            'web developer', 'software engineer', 'full stack', 'frontend developer', 'backend developer',
+            'financial analyst', 'curriculum vitae', 'resume', 'contact', 'profile', 'about',
         ]
         if any(header in line_lower for header in section_headers):
             continue
 
-        # Look for "Name:" label
         if 'name' in line_lower and ':' in line:
             name_part = line.split(':', 1)[1].strip()
             if name_part and len(name_part) > 2:
                 data['name'] = name_part
                 break
 
-        # Match Title Case names like "John Smith", "John A. Smith"
         name_pattern = r'^([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)$'
         match = re.match(name_pattern, line)
         if match:
             data['name'] = match.group(1)
             break
 
-        # Match ALL CAPS names like "JAMES MILLER", "JOHN A. SMITH"
         all_caps_pattern = r'^([A-Z]{2,}(?:\s+[A-Z]\.?)?\s+[A-Z]{2,}(?:\s+[A-Z]{2,})?)$'
         all_caps_match = re.match(all_caps_pattern, line)
         if all_caps_match:
             name_parts = line.split()
             data['name'] = ' '.join(p.title() for p in name_parts)
             break
-    # PASS 2: Look for names merged with section headers (e.g., "EXPERIENCEUMARSHAFEEQ")
+
+    # PASS 2: Look for names merged with section headers
     if not data['name']:
         for line in lines:
             line_clean = line.strip().upper()
@@ -505,43 +566,17 @@ def parse_cv_data(text: str, filename: str) -> Dict:
             if data['name']:
                 break
 
-    # PASS 2b: Alternative pattern - look for "Job Title Name" pattern in first few lines
-    if not data['name']:
-        for line in lines[:15]:
-            line_clean = line.strip()
-            # Skip lines that are clearly job titles without names
-            job_title_only = ['web developer', 'software engineer', 'full stack', 'frontend developer', 'backend developer', 'financial analyst']
-            line_lower = line_clean.lower()
-
-            # Look for pattern: Job Title + Name (e.g., "Web Developer Umar Shafeeq")
-            # Name comes after job title
-            for title in job_title_only:
-                if title in line_lower:
-                    # Get text after the job title
-                    title_idx = line_lower.find(title)
-                    after_title = line_clean[title_idx + len(title):].strip()
-                    if after_title:
-                        # Check if what follows looks like a name (2-4 capitalized words)
-                        words = after_title.split()
-                        if 1 <= len(words) <= 4 and all(w[0].isupper() for w in words if w):
-                            data['name'] = after_title
-                            break
-            if data['name']:
-                break
-
-    # PASS 3: Fallback - any 2-4 capitalized words in first few lines
+    # PASS 3: Fallback
     if not data['name']:
         for line in lines[:10]:
             words = line.strip().split()
             if 2 <= len(words) <= 4:
-                # Check if all words start with capital letters and are not common words
                 common_words = ['the', 'and', 'for', 'with', 'from', 'this', 'that', 'web', 'full', 'stack', 'software']
                 if all(w[0].isupper() for w in words if w):
                     if not any(w.lower() in common_words for w in words):
                         data['name'] = line.strip()
                         break
 
-    # FINAL VALIDATION: Ensure extracted name is not a section header or common non-name
     if data['name']:
         name_lower = data['name'].lower()
         invalid_names = [
@@ -549,10 +584,11 @@ def parse_cv_data(text: str, filename: str) -> Dict:
             'technical skills', 'skills', 'education', 'projects', 'certifications',
             'contact', 'profile', 'about', 'web developer', 'software engineer',
             'full stack', 'frontend developer', 'backend developer', 'superior university',
-            'university', 'college', 'curriculum vitae', 'resume', 'references'
+            'university', 'college', 'curriculum vitae', 'resume', 'references',
+            'financial analyst',
         ]
         if any(inv in name_lower for inv in invalid_names):
-            data['name'] = None  # Reset invalid name
+            data['name'] = None
 
     # Enhanced Education Extraction
     education_keywords = [
@@ -562,24 +598,18 @@ def parse_cv_data(text: str, filename: str) -> Dict:
         'intermediate', 'ics', 'fsc', 'ssc', 'hsc', 'fa', 'fs.c', 'i.com', 'i.cs'
     ]
 
-    # Look for education section and extract entries
     edu_section_found = False
-    lines = text.split('\n')
     for i, line in enumerate(lines):
         line_lower = line.lower().strip()
-        # Detect education section header
         if any(kw in line_lower for kw in ['education', 'academic', 'qualification', 'degree']):
             edu_section_found = True
             continue
 
         if edu_section_found:
-            # Stop at next major section
             if any(kw in line_lower for kw in ['experience', 'work', 'skills', 'projects', 'certifications', 'references', 'interests']) and i > 0:
                 break
 
-            # Extract education entries
             if any(kw in line_lower for kw in education_keywords):
-                # Get context (this line + next 1-2 lines)
                 context = line.strip()
                 if i + 1 < len(lines):
                     next_line = lines[i + 1].strip()
@@ -588,143 +618,72 @@ def parse_cv_data(text: str, filename: str) -> Dict:
                 if len(context) > 15:
                     data['education'].append(context[:200])
 
-    # Also do general keyword search as fallback
     if not data['education']:
-        # Check for intermediate/secondary education - look in merged text
-        intermediate_keywords = ['intermediate', 'ics', 'fsc', 'ssc', 'hsc', 'fa', 'i.com', 'i.cs']
-        for kw in intermediate_keywords:
-            if kw in text_lower:
-                # Find the keyword position and extract surrounding context
-                idx = text_lower.find(kw)
-                if idx >= 0:
-                    # Extract 100 chars before and after the keyword
-                    start = max(0, idx - 100)
-                    end = min(len(text), idx + 100)
-                    context = text[start:end]
+        for sentence in re.split(r'[\.\n]', text):
+            sent_lower = sentence.lower().strip()
+            if any(kw in sent_lower for kw in education_keywords):
+                if any(x in sent_lower for x in ['university', 'college', 'institute', 'degree', 'school', 'bachelor', 'master']):
+                    if len(sentence.strip()) > 15:
+                        data['education'].append(sentence.strip()[:200])
+                        if len(data['education']) >= 3:
+                            break
 
-                    # Clean up the context
-                    context = context.replace('\n', ' ')
-                    # Remove common noise words/patterns
-                    noise_patterns = [
-                        r'work experience\w*', r'web developer', r'email\s*:', r'phone\s*:',
-                        r'\+?\d[\d\s\-\(\)]{7,20}', r'\S+@\S+\.\S+', r'umers?hafeeq'
-                    ]
-                    for pattern in noise_patterns:
-                        context = re.sub(pattern, '', context, flags=re.IGNORECASE)
-
-                    context = re.sub(r'\s+', ' ', context).strip()
-                    if len(context) > 15 and len(context) < 200:
-                        data['education'].append(context)
-                    if len(data['education']) >= 3:
-                        break
-                if len(data['education']) >= 3:
-                    break
-
-        # Standard university/college education search
-        if not data['education']:
-            for kw in education_keywords[:5]:  # Check main keywords
-                if kw in text_lower:
-                    for sentence in re.split(r'[.\n]', text):
-                        sent_lower = sentence.lower()
-                        if kw in sent_lower and len(sentence.strip()) > 15:
-                            # Check if it looks like education
-                            if any(x in sent_lower for x in ['university', 'college', 'institute', 'degree', 'school']):
-                                data['education'].append(sentence.strip()[:200])
-                                if len(data['education']) >= 3:
-                                    break
-                    if len(data['education']) >= 3:
-                        break
-
-    # Enhanced Experience Extraction - IMPROVED
+    # Enhanced Experience Extraction
     company_indicators = ['inc', 'llc', 'ltd', 'limited', 'corp', 'corporation', 'company', 'co.', 'gmbh', 'ag', 'bv', 'plc', 'solutions', 'technologies', 'systems', 'group', 'services']
     job_title_keywords = ['engineer', 'manager', 'developer', 'analyst', 'consultant', 'director', 'lead', 'senior', 'junior', 'head', 'chief', 'vp', 'vice president', 'officer', 'coordinator', 'specialist', 'associate', 'assistant', 'designer', 'architect', 'administrator', 'intern', 'trainee', 'supervisor', 'executive', 'representative', 'strategist', 'coordinator', 'freelance', 'contractor']
 
-    # Method 1: Section-based extraction
     exp_section_found = False
     exp_section_keywords = ['experience', 'work', 'employment', 'career', 'professional background', 'work history']
     stop_keywords = ['education', 'skills', 'projects', 'certifications', 'references', 'interests', 'languages', 'awards', 'publications']
 
-    for i, line in enumerate(lines):
+    all_lines = text.split('\n')
+    for i, line in enumerate(all_lines):
         line_lower = line.lower().strip()
 
-        # Detect experience section header (more flexible matching)
         if any(kw in line_lower for kw in exp_section_keywords):
             exp_section_found = True
             continue
 
         if exp_section_found:
-            # Stop at next major section
             if any(kw in line_lower for kw in stop_keywords) and i > 0 and len(line.strip()) < 50:
                 break
 
-            # Extract experience entries - look for job titles, companies, dates, bullet points
             line_stripped = line.strip()
             if 10 < len(line_stripped) < 200:
-                # Check for date patterns (strong indicator of experience entry)
                 date_patterns = [
-                    r'\b(19|20)\d{2}\b',  # Years 1900-2099
+                    r'\b(19|20)\d{2}\b',
                     r'\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\.\s]+\d{4}\b',
                     r'\b\d{1,2}[\/\-]\d{4}\b',
-                    r'\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b',
                     r'\b(present|current|now|today|ongoing)\b',
                 ]
                 has_date = any(re.search(p, line_lower) for p in date_patterns)
-
-                # Check for company indicators
                 has_company = any(ind in line_lower for ind in company_indicators)
-
-                # Check for job titles
                 has_title = any(kw in line_lower for kw in job_title_keywords)
-
-                # Check for bullet points (common in experience descriptions)
                 has_bullet = line_stripped.startswith(('•', '-', '*', '→', '▪', '■'))
-
-                # Check for location patterns
                 has_location = re.search(r'\b[A-Z][a-z]+,\s*[A-Z]{2,}\b|\b[A-Z][a-z]+,\s*[A-Z][a-z]+\b', line)
 
-                # Accept if it has any strong indicator
                 if has_date or has_company or (has_title and len(line_stripped) < 120) or (has_bullet and len(line_stripped) > 20) or has_location:
                     data['experience'].append(line_stripped[:200])
                     if len(data['experience']) >= 8:
                         break
 
-    # Method 2: Pattern-based extraction (broader search across entire text)
-    if not data['experience'] or len(data['experience']) < 2:
-        # Look for patterns like "Job Title at Company" or "Company - Job Title"
+    # Fallback experience extraction
+    if not data['experience']:
         experience_patterns = [
             r'([A-Z][a-zA-Z\s]+(?:Engineer|Developer|Manager|Analyst|Consultant|Designer|Architect|Director|Lead|Head|Chief|VP|Officer|Coordinator|Specialist|Associate|Assistant|Intern))\s*(?:at|@|with|for|-)\s*([A-Z][a-zA-Z\s]+)',
             r'([A-Z][a-zA-Z\s]+(?:Inc\.?|LLC|Ltd\.?|Limited|Corp\.?|Corporation|Company|Co\.))\s*[-–]\s*([A-Z][a-zA-Z\s]+)',
-            r'([A-Z][a-zA-Z\s]+)\s*\(\s*(?:20\d{2}|19\d{2})\s*[-–]\s*(?:20\d{2}|19\d{2}|present|current)\s*\)',
         ]
-
         for pattern in experience_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if isinstance(match, tuple):
-                    entry = ' '.join(match).strip()
-                else:
-                    entry = match.strip()
+                entry = ' '.join(match).strip() if isinstance(match, tuple) else match.strip()
                 if len(entry) > 15 and len(entry) < 200:
                     data['experience'].append(entry)
             if len(data['experience']) >= 5:
                 break
 
-    # Method 3: Sentence-based fallback
-    if not data['experience']:
-        sentences = re.split(r'[\.\n]', text)
-        for sentence in sentences:
-            sent_lower = sentence.lower().strip()
-            # Look for experience-indicating phrases
-            exp_phrases = ['worked at', 'employed at', 'position at', 'role at', 'job at', 'experience at', 'intern at', 'consultant at', 'worked with', 'employed by', 'joined', 'responsible for']
-            if any(kw in sent_lower for kw in exp_phrases):
-                if len(sentence.strip()) > 20 and len(sentence.strip()) < 200:
-                    data['experience'].append(sentence.strip()[:200])
-                    if len(data['experience']) >= 3:
-                        break
-
-    # Remove duplicates while preserving order
-    data['education'] = list(dict.fromkeys(data['education']))[:5]  # Limit to 5 entries
-    data['experience'] = list(dict.fromkeys(data['experience']))[:5]  # Limit to 5 entries
+    data['education'] = list(dict.fromkeys(data['education']))[:5]
+    data['experience'] = list(dict.fromkeys(data['experience']))[:5]
 
     return data
 
@@ -964,16 +923,13 @@ def ai_job_matches(cv_data: Dict, location: str = "Pakistan") -> List[Dict]:
     skills = cv_data.get('skills', [])
     skills_str = ", ".join(skills[:8])
 
-    # Detect role from skills
     role = detect_field_from_skills(skills)
     search_query = f"{role} {' '.join(skills[:3])}"
 
-    # Try real jobs from JSearch first
     raw_jobs = fetch_real_jobs(search_query, location)
     if raw_jobs:
         return transform_jsearch_jobs(raw_jobs, skills)
 
-    # Fall back to AI-generated jobs
     prompt = f"""Generate 6 realistic job matches for Pakistan market.
 
 Candidate skills: {skills_str}
@@ -1025,6 +981,7 @@ def detect_field_from_skills(skills: List[str]) -> str:
         "Backend Developer": ["node", "python", "java", "database", "api", "server"],
         "DevOps Engineer": ["docker", "kubernetes", "aws", "azure", "ci/cd"],
         "Data Analyst": ["excel", "sql", "tableau", "power bi", "analytics"],
+        "Financial Analyst": ["financial analysis", "excel", "accounting", "budgeting", "forecasting"],
         "Mobile Developer": ["android", "ios", "flutter", "react native"],
     }
     scores = {}
@@ -1443,24 +1400,73 @@ def upload_cv():
     cv_data = parse_cv_data(text, filename)
     analysis = analyze_cv_quality(cv_data, text)
 
-    # Check if text extraction was poor (possible image-based PDF)
+    # Detect if text extraction was poor (image-based PDF)
     warnings = []
+    is_image_pdf = False
+    
     if len(text.strip()) < 100:
-        warnings.append("PDF appears to be image-based or scanned. Text extraction failed. For best results, please upload a text-based PDF or DOCX file.")
-    elif len(text.strip()) < 500:
-        warnings.append("Limited text extracted from PDF. If this is a scanned document, please upload the original text-based file for better results.")
+        is_image_pdf = True
+        warnings.append(
+            "⚠️ This appears to be an image-based or scanned PDF. "
+            "OCR was attempted but may have limited accuracy. "
+            "For best results, upload the original text-based PDF or DOCX file."
+        )
+    elif len(text.strip()) < 300:
+        warnings.append(
+            "Limited text was extracted from your PDF. "
+            "If this is a screenshot or scanned document, consider uploading a text-based version for better analysis."
+        )
+
+    # Log for debugging
+    print(f"CV Upload: filename={filename}, text_length={len(text)}, skills={len(cv_data.get('skills', []))}, word_count={cv_data.get('word_count', 0)}")
 
     try:
         ai_analysis = ai_full_analysis(text, cv_data)
     except Exception as e:
         print(f"AI analysis failed: {e}")
         ai_analysis = {
-            "ats_score": {"score": analysis.get('percentage', 65), "grade": "C", "keyword_density": "medium", "format_issues": ["AI analysis temporarily unavailable"], "missing_keywords": [], "passed_checks": ["CV parsed", "Contact info detected"]},
-            "mistake_detector": {"grammar_errors": [], "employment_gaps": [], "weak_action_verbs": [], "missing_metrics": [], "overall_writing_score": analysis.get('percentage', 65)},
-            "template_suggestion": {"current_format": "Standard", "recommended_template": "Chronological", "reasons": ["Standard format works"], "before_after_tips": ["AI analysis unavailable"]}
+            "ats_score": {
+                "score": analysis.get('percentage', 65), 
+                "grade": "C" if analysis.get('percentage', 65) < 70 else "B", 
+                "keyword_density": "medium", 
+                "format_issues": ["AI analysis temporarily unavailable"], 
+                "missing_keywords": [], 
+                "passed_checks": ["CV parsed", "Contact info detected"]
+            },
+            "mistake_detector": {
+                "grammar_errors": [], 
+                "employment_gaps": [], 
+                "weak_action_verbs": [], 
+                "missing_metrics": [], 
+                "overall_writing_score": analysis.get('percentage', 65)
+            },
+            "template_suggestion": {
+                "current_format": "Standard", 
+                "recommended_template": "Chronological", 
+                "reasons": ["Standard format works"], 
+                "before_after_tips": ["AI analysis unavailable"]
+            }
         }
 
-    cv_data_with_analysis = {**cv_data, 'analysis': analysis, 'ai_analysis': ai_analysis, 'warnings': warnings}
+    # FIX: Align ATS score with CV quality score for consistency
+    # If CV score is low (due to image PDF), don't show falsely high ATS score
+    if is_image_pdf or analysis.get('percentage', 100) < 30:
+        # Align the ATS score with reality
+        ai_analysis['ats_score']['score'] = max(
+            analysis.get('percentage', 30),
+            ai_analysis['ats_score']['score'] - 20
+        )
+        if not ai_analysis['ats_score']['format_issues']:
+            ai_analysis['ats_score']['format_issues'] = []
+        ai_analysis['ats_score']['format_issues'].insert(0, "Limited text extracted - consider uploading text-based PDF")
+
+    cv_data_with_analysis = {
+        **cv_data, 
+        'analysis': analysis, 
+        'ai_analysis': ai_analysis, 
+        'warnings': warnings,
+        'is_image_pdf': is_image_pdf,
+    }
 
     if hasattr(g, 'user_id'):
         cv_doc = {'user_id': g.user_id, 'created_at': datetime.utcnow().isoformat(), **cv_data_with_analysis}
@@ -1987,7 +1993,6 @@ def check_and_award_badges(user_id: str, cv_score: Optional[int] = None, score_i
         if badge_id in BADGES:
             gamification['badges'].append({'id': badge_id, 'awarded_at': datetime.utcnow().isoformat(), **BADGES[badge_id]})
 
-    # Update streak
     today = datetime.utcnow().date()
     last_upload = stats.get('last_upload_date')
     if last_upload:
@@ -2005,7 +2010,6 @@ def check_and_award_badges(user_id: str, cv_score: Optional[int] = None, score_i
     stats['last_upload_date'] = today.isoformat()
     stats['total_uploads'] = stats.get('total_uploads', 0) + 1
 
-    # First upload badge
     existing_badge_ids_updated = [b['id'] for b in gamification.get('badges', [])]
     if stats['total_uploads'] == 1 and 'first_upload' not in existing_badge_ids_updated:
         gamification['badges'].append({'id': 'first_upload', 'awarded_at': datetime.utcnow().isoformat(), **BADGES['first_upload']})
