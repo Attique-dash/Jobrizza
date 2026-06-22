@@ -51,11 +51,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     // First, authenticate with Flask backend to get token
-    const flaskRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
+    let flaskRes;
+    try {
+      flaskRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+    } catch (fetchError) {
+      throw new Error('Cannot connect to server. Please ensure the backend is running.')
+    }
     
     const flaskData = await flaskRes.json()
     if (!flaskRes.ok) {
@@ -81,11 +86,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (name: string, email: string, password: string, userType: 'candidate' | 'recruiter' = 'candidate') => {
     // Register with Flask backend
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password, user_type: userType }),
-    })
+    let res;
+    try {
+      res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password, user_type: userType }),
+      })
+    } catch (fetchError) {
+      throw new Error('Cannot connect to server. Please ensure the backend is running.')
+    }
 
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Registration failed')
