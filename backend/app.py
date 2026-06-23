@@ -92,10 +92,11 @@ waitlist_collection = db['waitlist']
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me-in-production-32-chars!!')
 
-# ── Groq AI ────────────────────────────────────────────────────────────────────
+# ─ Groq AI ────────────────────────────────────────────────────────────────────
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or os.getenv("Jobrizza_AI_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Vision-capable model for OCR
 
 # ── JSearch API (RapidAPI) ───────────────────────────────────────────────────
 JSEARCH_API_KEY = os.getenv("JSEARCH_API_KEY", "")
@@ -356,7 +357,7 @@ def extract_text_from_pdf(filepath: str) -> str:
     Extract text from PDF files.
     Strategy:
     1. Try PyMuPDF native text extraction (best for text PDFs)
-    2. If insufficient text, fall back to OCR (for image-based PDFs)
+    2. If insufficient text, fall back to Vision OCR (for image-based PDFs)
     3. Fall back to PyPDF2 as last resort
     """
     # Strategy 1: PyMuPDF with OCR fallback (best approach)
@@ -366,9 +367,16 @@ def extract_text_from_pdf(filepath: str) -> str:
             return text
         elif text and len(text.strip()) > 20:
             # Got some text but might be incomplete
-            print(f"PyMuPDF got partial text ({len(text)} chars), trying PyPDF2 as backup...")
+            print(f"PyMuPDF got partial text ({len(text)} chars), trying Vision OCR as backup...")
     
-    # Strategy 2: PyPDF2 fallback
+    # Strategy 2: Vision OCR for image-based PDFs
+    print("Native text extraction failed, trying Vision OCR...")
+    vision_text = extract_text_with_vision_ocr(filepath)
+    if vision_text and len(vision_text.strip()) > 50:
+        print(f"Vision OCR successful: {len(vision_text)} chars extracted")
+        return vision_text
+    
+    # Strategy 3: PyPDF2 fallback
     if PyPDF2 is not None:
         text_parts = []
         try:
@@ -392,13 +400,88 @@ def extract_text_from_pdf(filepath: str) -> str:
         if result.strip():
             return result
     
-    # If we got OCR text but it was short, return it anyway
+    # If we got any text, return it
+    if vision_text:
+        return vision_text
     if PYMUPDF_AVAILABLE:
         text = extract_text_with_ocr(filepath)
         if text:
             return text
     
     return "PDF text extraction failed. This may be an image-based or scanned PDF."
+
+
+def extract_text_with_vision_ocr(filepath: str) -> str:
+    """
+    Extract text from image-based PDFs using Groq Vision API.
+    Converts PDF pages to images and uses AI vision model for OCR.
+    """
+    if not PYMUPDF_AVAILABLE or not GROQ_API_KEY:
+        return ""
+    
+    try:
+        import base64
+        doc = fitz.open(filepath)
+        all_text = []
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            
+            # Render page as high-resolution image
+            mat = fitz.Matrix(3, 3)  # 3x resolution for better OCR
+            pix = page.get_pixmap(matrix=mat)
+            img_data = pix.tobytes("png")
+            
+            # Convert to base64
+            img_base64 = base64.b64encode(img_data).decode('utf-8')
+            
+            # Call Groq Vision API
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+            }
+            payload = {
+                "model": GROQ_VISION_MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Extract ALL text from this CV/resume document. Return the complete text content exactly as it appears, preserving the structure. Include all names, contact info, skills, experience, education, and any other text. Do not add any commentary, just return the raw text."
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{img_base64}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "temperature": 0.1,
+                "max_tokens": 4096,
+            }
+            
+            try:
+                resp = requests.post(GROQ_BASE_URL, headers=headers, json=payload, timeout=60)
+                resp.raise_for_status()
+                result = resp.json()
+                extracted_text = result["choices"][0]["message"]["content"]
+                if extracted_text.strip():
+                    all_text.append(extracted_text.strip())
+                    print(f"Vision OCR extracted {len(extracted_text)} chars from page {page_num + 1}")
+            except Exception as e:
+                print(f"Vision OCR error on page {page_num + 1}: {e}")
+        
+        doc.close()
+        result = "\n\n".join(all_text)
+        print(f"Total vision OCR text: {len(result)} characters")
+        return result
+        
+    except Exception as e:
+        print(f"Vision OCR extraction error: {e}")
+        return ""
 
 
 def extract_text_from_docx(filepath: str) -> str:
